@@ -82,7 +82,7 @@ reports to the Claude app on your phone or tablet.
   \node[box] (gh) {GitHub\\\code{mattobryan/AAT}\\code + configs};
   \node[box, right=of gh] (kg) {Kaggle notebook\\2$\times$T4, $\le$12\,h/session\\trains \& evaluates};
   \node[box, right=of kg] (hf) {Hugging Face Hub\\private model repo\\checkpoints + logs};
-  \node[box, below=1.6cm of hf] (rt) {Claude routine\\every 30 min\\\code{scripts/status.py}};
+  \node[box, below=1.6cm of hf] (rt) {Claude routine\\every hour\\\code{scripts/status.py}};
   \node[box, left=of rt] (tb) {You\\tablet / phone\\push notification};
   \draw[arr] (gh) -- node[above]{git clone} (kg);
   \draw[arr] (kg) to[bend left=12] node[above]{push/epoch} (hf);
@@ -218,7 +218,7 @@ Stage B (the fine-tuning cross-check, $\approx$1 GPU-hour per seed) can run on l
 
 \section{Monitoring and reports}
 
-The routine runs every 30 minutes in a fresh cloud session. It checks out the branch, runs
+The routine runs every hourutes in a fresh cloud session. It checks out the branch, runs
 \code{python scripts/status.py}, and sends a short report to the Claude app. Example:
 \begin{lstlisting}
 AAT status 2026-09-26 14:30 UTC (user/aat-checkpoints)
