@@ -131,7 +131,7 @@ Setting & Clean & $\ell_\infty$ & $\ell_2$ & $\ell_1$ & Union & Role \\
 RAMP from scratch, 80 ep, $\lambda{=}5$, GP (paper Tab.~3) & 81.2 & 46.0 & 65.8 & 48.3 & 44.6 & \textbf{thesis baseline} \\
 Thesis Table 7.1 (5 runs)                          & 81.3 & 45.96 & 65.74 & 48.42 & 44.5 & to match \\
 RAMP fine-tune 3 ep, $\lambda{=}1.5$ (paper Tab.~24) & 81.1 & 45.4 & 66.1 & 47.2 & 43.1 & cross-check \\
-\code{pretr\_Linf} (fine-tuning start)             & 83.7 & 48.1 & 59.8 & 7.7 & 38.5 & sanity \\
+\code{pretr\_Linf} (fine-tuning start)             & 83.7 & 48.1 & 59.8 & 7.7 & $\approx$7 & sanity \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -196,7 +196,7 @@ Until both are set, every report reads ``monitor not configured''.
         The run continues on Kaggle's servers after you close the browser, up to 12 hours.
   \item Setup cell: clones the repository and the official RAMP code, applies the patch, installs
         dependencies and downloads CIFAR-10 ($\approx$3 min).
-  \item Sanity cell: evaluates \code{pretr\_Linf}. Expect $\approx$83.7 / 48.1 / 59.8 / 7.7 / 38.5.
+  \item Sanity cell: evaluates \code{pretr\_Linf}. Expect $\approx$83.7 / 48.1 / 59.8 / 7.7 / union ≈ 7.
   \item Stage A: RAMP from scratch, seed~0 on GPU~0 and seed~1 on GPU~1. Each run stops at 11\,h and
         pushes its checkpoint.
 \end{enumerate}
@@ -312,7 +312,7 @@ Symptom & Fix \\
 \code{nothing to pull} on the first run & expected: no checkpoint exists yet. \\
 Setup fails on \code{git apply} & the patch is already applied (the setup script skips it) or the pinned commit changed; re-run setup in a fresh session. \\
 CUDA out of memory & another run is using the same GPU: check \code{CUDA\_VISIBLE\_DEVICES} in the cell (0 and 1). \\
-Sanity numbers far from 83.7 / 38.5 & evaluation or data problem: stop and investigate before training. \\
+Sanity numbers far from 83.7 clean / 48.1 $\ell_\infty$ & evaluation or data problem: stop and investigate before training. \\
 Result OFF by $>2$\,pp & compare the seed-0 official eval log with ours; check the epoch count and $\lambda$ in \code{log\_train.txt}. \\
 \bottomrule
 \end{tabularx}

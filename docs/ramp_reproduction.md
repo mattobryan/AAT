@@ -10,7 +10,7 @@ us RAMP's weights. Those weights and numbers become the fixed baseline that AAT 
 |---|---|---|---|---|---|---|
 | **From scratch**, 80 ep, λ=5, GP (paper Table 3) | 81.2 | 46.0 | 65.8 | 48.3 | 44.6 | **Thesis baseline** (thesis Table 7.1: 81.3 / 45.96 / 65.74 / 48.42 / 44.5) |
 | Fine-tune `pretr_Linf` 3 ep, λ=1.5 (paper Table 24) | 81.1 | 45.4 | 66.1 | 47.2 | 43.1 | Cheap cross-check of the pipeline |
-| `pretr_Linf` (start point) | 83.7 | 48.1 | 59.8 | 7.7 | 38.5 | Sanity check of the evaluation |
+| `pretr_Linf` (start point) | 83.7 | 48.1 | 59.8 | 7.7 | ≈7 (38.5 is the average) | Sanity check of the evaluation |
 
 ## How the 12-hour Kaggle limit is handled
 

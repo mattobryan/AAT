@@ -32,11 +32,16 @@ setup)
   # resume + HF Hub sync for RAMP.py (reviewable diff: baselines/ramp_resume_hub.patch)
   git -C "$EXT" apply --check "$ROOT/baselines/ramp_resume_hub.patch" 2>/dev/null && git -C "$EXT" apply "$ROOT/baselines/ramp_resume_hub.patch"
   cp "$ROOT/aat/hub.py" "$EXT/hub_sync.py"
-  # robustbench pins its own autoattack commit, so asking pip for both fails and installs neither.
-  # Install autoattack, then robustbench without its dependency pins, then check both import.
-  pip install -q huggingface_hub git+https://github.com/fra31/auto-attack
-  pip install -q --no-deps git+https://github.com/RobustBench/robustbench.git
-  pip install -q timm gdown requests pandas pyyaml
+  # robustbench pins its own autoattack commit, so never request autoattack separately alongside it.
+  # Normal install first (brings geotorch, timm, its pinned autoattack); if pip cannot resolve it,
+  # fall back to installing the pieces one by one.
+  pip install -q huggingface_hub
+  if ! pip install -q git+https://github.com/RobustBench/robustbench.git; then
+    pip install -q --no-deps git+https://github.com/RobustBench/robustbench.git
+    pip install -q geotorch timm gdown requests pandas pyyaml
+  fi
+  python -c "import autoattack" 2>/dev/null || pip install -q git+https://github.com/fra31/auto-attack
+  python -c "import robustbench" 2>/dev/null || pip install -q geotorch
   python -c "import autoattack, robustbench, huggingface_hub; print('imports OK: autoattack, robustbench, huggingface_hub')"
   # CIFAR-10: the Toronto mirror can be very slow, so keep a copy in the HF repo after the first download
   TAR="$DATA/cifar-10-python.tar.gz"; mkdir -p "$DATA"

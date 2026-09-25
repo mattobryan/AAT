@@ -41,6 +41,8 @@ def main():
             continue
         tgt = table[key]
         for m in METRICS:
+            if tgt.get(m) is None:
+                continue
             v = np.array([row[m] for row in rows[ours]]) * 100
             d = v.mean() - tgt[m]
             verdict = "OK" if abs(d) <= 1.0 else "CLOSE" if abs(d) <= 2.0 else "OFF"
