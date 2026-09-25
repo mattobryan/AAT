@@ -40,6 +40,9 @@ def _emit(report, as_json):
         print(json.dumps(report))
     else:
         print(report.get("message") or f"AAT status {report['generated_at']} UTC ({report['repo']})")
+        for st in report.get("stages", [])[-3:]:
+            print(f"stage {st['stage']}: {st['state'].upper()} ({st['started']}, {st['minutes']} min)"
+                  + (f" -> {st['tail'][-1]}" if st["state"] == "failed" and st.get("tail") else ""))
         print("\n".join(r["line"] for r in report.get("runs", [])))
 
 
@@ -60,6 +63,12 @@ def main():
         report["message"] = f"cannot read {repo}: {type(e).__name__}"
         _emit(report, as_json)
         return 1
+    if "logs/stages.json" in files:  # notebook stages recorded by scripts/stage.py
+        try:
+            events = json.load(open(hf_hub_download(repo, "logs/stages.json", token=token)))
+            report["stages"] = events[-6:]
+        except Exception:
+            pass
     logs = [f for f in files if f.endswith(("log_train.txt", "log.jsonl"))]
     if not logs:
         report["message"] = f"{repo}: no runs have pushed yet"

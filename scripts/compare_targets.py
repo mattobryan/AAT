@@ -37,19 +37,21 @@ def main():
         ours, key = pair.split("=")
         if ours not in rows:
             out.append(f"| {ours} | 0 | – | not evaluated | | | |")
+            worst = "NOT EVALUATED"
             continue
         tgt = table[key]
         for m in METRICS:
             v = np.array([row[m] for row in rows[ours]]) * 100
             d = v.mean() - tgt[m]
             verdict = "OK" if abs(d) <= 1.0 else "CLOSE" if abs(d) <= 2.0 else "OFF"
-            if verdict == "OFF" or (verdict == "CLOSE" and worst == "OK"):
+            if worst != "NOT EVALUATED" and (verdict == "OFF" or (verdict == "CLOSE" and worst == "OK")):
                 worst = verdict
             sd = f" ± {v.std(ddof=1):.1f}" if len(v) > 1 else ""
             out.append(f"| {ours} | {len(v)} | {m} | {v.mean():.1f}{sd} | {tgt[m]} | {d:+.1f} | {verdict} |")
     print("\n".join(out))
     print(f"\noverall: {worst}")
+    return 0 if worst in ("OK", "CLOSE") else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

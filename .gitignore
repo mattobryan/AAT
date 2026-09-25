@@ -7,3 +7,4 @@ __pycache__/
 external/
 runs_official/
 logs_*.txt
+logs/

@@ -70,6 +70,16 @@
   .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
   .final { font-size: 0.86rem; }
   .empty-chart { font-size: 0.82rem; color: var(--muted); padding: 18px 0; }
+  .stages { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: grid; gap: 8px; }
+  .stages h2 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0; font-weight: 600; }
+  .stage { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: baseline; }
+  .stage .when { font-size: 0.8rem; color: var(--muted); }
+  .stage .name { font-family: var(--mono); font-size: 0.9rem; overflow-wrap: anywhere; }
+  .stage pre { grid-column: 1 / -1; margin: 0; font: 0.78rem/1.45 var(--mono); color: var(--warn); background: var(--warn-bg);
+               padding: 8px 10px; border-radius: 8px; overflow-x: auto; white-space: pre; }
+  .pill.ok { color: var(--ok); background: var(--ok-bg); }
+  .pill.failed { color: var(--warn); background: var(--warn-bg); }
+  .pill.paused, .pill.started { color: var(--run); background: var(--run-bg); }
   footer { color: var(--muted); font-size: 0.8rem; display: grid; gap: 4px; }
   @media (prefers-reduced-motion: reduce) { .bar > span { transition: none; } }
 </style>
@@ -87,6 +97,8 @@
   </header>
 
   <div class="notice" id="notice" hidden></div>
+
+  <section class="stages" id="stages" hidden></section>
 
   <section class="runs" id="runs" aria-live="polite"></section>
 
@@ -218,6 +230,16 @@
     } else {
       n.hidden = true;
     }
+    const stages = ((report && report.stages) || []).slice().reverse();
+    const st = $("stages");
+    st.hidden = !stages.length;
+    st.innerHTML = stages.length ? `<h2>Notebook stages</h2>` + stages.map((e) => {
+      const label = { ok: "OK", failed: "Failed", paused: "Paused" }[e.state] || e.state;
+      const cls = ["ok", "failed", "paused"].includes(e.state) ? e.state : "started";
+      return `<div class="stage"><span class="pill ${cls}">${esc(label)}</span><span class="name">${esc(e.stage)}</span>
+        <span class="when">${esc(e.started)} · ${esc(e.minutes)} min</span>
+        ${e.state === "failed" && e.tail && e.tail.length ? `<pre>${esc(e.tail.slice(-6).join("\n"))}</pre>` : ""}</div>`;
+    }).join("") : "";
     $("runs").innerHTML = runs.map(runCard).join("");
   }
 
