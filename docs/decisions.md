@@ -31,3 +31,19 @@ H1 if tau < 0.3 off the diagonal, H0 if tau > 0.7, bootstrap confidence interval
 Rejected: judging "little" versus "comparable" transfer after seeing results.
 Why: a threshold set after the data can be bent to fit any outcome.
 Cost: results between 0.3 and 0.7 are reported as inconclusive.
+
+## D5. The language family has two versions: pure Swahili and code switched
+Chosen: every harmful request gets a pure Swahili version and a code switched version
+(English and Swahili mixed in one sentence, including Sheng), tested as separate columns
+in the transfer matrix. Speech input is out of scope.*
+Rejected: pure Swahili only; building a code switched speech recognition model.
+Why: code switched text is how Kenyan users actually write, and safety training data is
+mostly one clean language at a time, so it is the likeliest blind spot. Speech recognition
+is a language technology problem, not a safety one, and other groups already work on it.
+Cost: a second version of every request; manual review of a sample by a native speaker,
+since no tool reliably produces natural code switched text; one more row and column in the
+matrix, which adds training and evaluation runs.
+
+\* Precautions. (1) In this repo ASR always means attack success rate, never automatic
+speech recognition. (2) There is some prior work using code switching for red teaming
+(recalled, not yet verified); confirm and cite it before any claim of novelty.
