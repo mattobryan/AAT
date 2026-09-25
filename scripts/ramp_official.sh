@@ -22,7 +22,7 @@ cmd=$1; shift
 run_name() { if [ "$1" = "ramp_scratch" ]; then echo "ramp_scratch_l5_s$2"; else echo "${1}_ft_s$2"; fi; }
 
 case $cmd in
-setup)
+install)
   if [ ! -d "$EXT/.git" ]; then
     git clone -q https://github.com/uiuc-focal-lab/RAMP "$EXT"
   fi
@@ -32,24 +32,26 @@ setup)
   # resume + HF Hub sync for RAMP.py (reviewable diff: baselines/ramp_resume_hub.patch)
   git -C "$EXT" apply --check "$ROOT/baselines/ramp_resume_hub.patch" 2>/dev/null && git -C "$EXT" apply "$ROOT/baselines/ramp_resume_hub.patch"
   cp "$ROOT/aat/hub.py" "$EXT/hub_sync.py"
-  # robustbench pins its own autoattack commit, so never request autoattack separately alongside it.
-  # Normal install first (brings geotorch, timm, its pinned autoattack); if pip cannot resolve it,
-  # fall back to installing the pieces one by one.
-  pip install -q huggingface_hub
-  if ! pip install -q git+https://github.com/RobustBench/robustbench.git; then
+  # dependencies first, then a full import check (also imports the official RAMP.py) before anything else
+  pip install -q -r "$ROOT/requirements-kaggle.txt" || {
+    echo "normal install failed; installing the pieces one by one"
+    pip install -q huggingface_hub pyyaml geotorch timm gdown requests pandas
     pip install -q --no-deps git+https://github.com/RobustBench/robustbench.git
-    pip install -q geotorch timm gdown requests pandas pyyaml
-  fi
-  python -c "import autoattack" 2>/dev/null || pip install -q git+https://github.com/fra31/auto-attack
-  python -c "import robustbench" 2>/dev/null || pip install -q geotorch
-  python -c "import autoattack, robustbench, huggingface_hub; print('imports OK: autoattack, robustbench, huggingface_hub')"
+    python -c "import autoattack" 2>/dev/null || pip install -q git+https://github.com/fra31/auto-attack
+  }
+  python "$ROOT/scripts/check_env.py"
+  ;;
+data)
   # CIFAR-10: the Toronto mirror can be very slow, so keep a copy in the HF repo after the first download
   TAR="$DATA/cifar-10-python.tar.gz"; mkdir -p "$DATA"
   [ -f "$TAR" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" cache/cifar-10-python.tar.gz "$TAR" || true
   had_cache=0; [ -f "$TAR" ] && had_cache=1
   python -c "import torchvision; torchvision.datasets.CIFAR10('$DATA', train=True, download=True); torchvision.datasets.CIFAR10('$DATA', train=False, download=True)"
   [ $had_cache = 1 ] || python "$ROOT/aat/hub.py" push "${HF_REPO:-none}" "$TAR" cache/cifar-10-python.tar.gz || true
-  test -f "$EXT/models/pretr_Linf.pth" && echo "setup OK"
+  echo "data OK"
+  ;;
+setup)
+  bash "$0" install && bash "$0" data
   ;;
 train)
   method=$1; seeds=$2; gpu=${3:-0}

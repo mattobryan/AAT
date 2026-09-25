@@ -1,0 +1,5 @@
+# Everything the Kaggle notebook needs on top of Kaggle's preinstalled torch/torchvision/numpy.
+# robustbench brings its own pinned autoattack and geotorch; never list autoattack separately.
+huggingface_hub
+pyyaml
+git+https://github.com/RobustBench/robustbench.git
