@@ -47,3 +47,13 @@ to reproduce. Page numbers refer to the PDF.
    APGD-CE + APGD-T on the first 1000 test points, per norm, with the union as a per-sample AND.
 10. **Compute is not matched.** 3-norm methods run ~3× more attack steps per batch than E-AT or
     2A/2B. The summary table reports train GPU-minutes for every run.
+
+## Found while reproducing RAMP (step 1)
+
+11. **Thesis Table 7.1 is the paper's from-scratch λ=5 result.** Its averages match RAMP Table 3
+    (81.2 / 46.0 / 65.8 / 48.3 / 44.6) to within 0.1 pp. That setting takes about 3.5 h per seed on an
+    A100, and the public code's `--gp` path raises a NameError (`utils.py` lacks `import copy`). How
+    those five runs were produced needs to be documented. The rebuild reproduces the fine-tuning
+    setting (Table 24) instead; see `docs/ramp_reproduction.md`.
+12. **The evaluation protocol is the first 1,000 test points.** `pretr_Linf` gives 83.7 % there, which
+    matches the paper, versus 82.8 % on the full 10k.

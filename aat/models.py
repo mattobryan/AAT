@@ -22,31 +22,39 @@ class Normalize(nn.Module):
         return (x - self.mean) / self.std
 
 
+def _act(name):
+    if name == "relu":
+        return F.relu
+    beta = int(name.replace("softplus", ""))  # "softplus1" as in the RAMP / E-AT model zoo
+    return lambda t: F.softplus(t, beta=beta)
+
+
 class PreActBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1):
+    def __init__(self, in_planes, planes, stride=1, activation="relu"):
         super().__init__()
+        self.act = _act(activation)
         self.bn1 = nn.BatchNorm2d(in_planes)
         self.conv1 = nn.Conv2d(in_planes, planes, 3, stride, 1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
         self.conv2 = nn.Conv2d(planes, planes, 3, 1, 1, bias=False)
         self.shortcut = None
         if stride != 1 or in_planes != planes:
-            self.shortcut = nn.Conv2d(in_planes, planes, 1, stride, bias=False)
+            self.shortcut = nn.Sequential(nn.Conv2d(in_planes, planes, 1, stride, bias=False))
 
     def forward(self, x):
-        out = F.relu(self.bn1(x))
+        out = self.act(self.bn1(x))
         sc = self.shortcut(out) if self.shortcut is not None else x
         out = self.conv1(out)
-        out = self.conv2(F.relu(self.bn2(out)))
+        out = self.conv2(self.act(self.bn2(out)))
         return out + sc
 
 
 class PreActResNet(nn.Module):
-    def __init__(self, num_blocks=(2, 2, 2, 2), num_classes=10):
+    def __init__(self, num_blocks=(2, 2, 2, 2), num_classes=10, activation="relu"):
         super().__init__()
-        self.in_planes = 64
+        self.in_planes, self.activation = 64, activation
         self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
         self.layer1 = self._make_layer(64, num_blocks[0], 1)
         self.layer2 = self._make_layer(128, num_blocks[1], 2)
@@ -58,7 +66,7 @@ class PreActResNet(nn.Module):
     def _make_layer(self, planes, n, stride):
         layers = []
         for s in [stride] + [1] * (n - 1):
-            layers.append(PreActBlock(self.in_planes, planes, s))
+            layers.append(PreActBlock(self.in_planes, planes, s, self.activation))
             self.in_planes = planes
         return nn.Sequential(*layers)
 
@@ -71,10 +79,26 @@ class PreActResNet(nn.Module):
 
 
 def build_model(name: str = "preactresnet18", dataset: str = "cifar10") -> nn.Module:
+    """preactresnet18          ReLU, CIFAR normalisation inside the model
+    preactresnet18_softplus  the RAMP / E-AT architecture (softplus(beta=1) in the blocks, no input
+                             normalisation); loads the official pretr_{Linf,L1,L2}.pth checkpoints"""
     num_classes = 100 if dataset == "cifar100" else 10
     mean, std = (CIFAR100_MEAN, CIFAR100_STD) if dataset == "cifar100" else (CIFAR10_MEAN, CIFAR10_STD)
     if name == "preactresnet18":
-        net = PreActResNet((2, 2, 2, 2), num_classes)
-    else:
-        raise ValueError(f"unknown model {name}")
-    return nn.Sequential(Normalize(mean, std), net)
+        return nn.Sequential(Normalize(mean, std), PreActResNet((2, 2, 2, 2), num_classes))
+    if name == "preactresnet18_softplus":
+        return nn.Sequential(nn.Identity(), PreActResNet((2, 2, 2, 2), num_classes, activation="softplus1"))
+    raise ValueError(f"unknown model {name}")
+
+
+def load_weights(model: nn.Module, path: str, map_location="cpu"):
+    """Accepts our checkpoints ({'model': sd}) and raw state_dicts from the RAMP / E-AT repos
+    (keys without the leading '1.' of our Sequential wrapper)."""
+    sd = torch.load(path, map_location=map_location)
+    sd = sd.get("model", sd.get("state_dict", sd))
+    if not any(k.startswith("1.") for k in sd):
+        sd = {f"1.{k}": v for k, v in sd.items()}
+    own = model.state_dict()
+    sd.update({k: v for k, v in own.items() if k.startswith("0.") and k not in sd})  # Normalize buffers
+    model.load_state_dict(sd)
+    return model

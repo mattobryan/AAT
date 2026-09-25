@@ -1,0 +1,17 @@
+# Published numbers to reproduce. Clean / l_inf(8/255) / l_2(0.5) / l_1(12) / union, %.
+# AutoAttack APGD-CE + APGD-T. Fine-tuning rows are on the first 1000 CIFAR-10 test points
+# (confirmed: pretr_Linf gives 83.7% clean on the first 1000, 82.8% on all 10k).
+
+finetune_table24:   # RAMP paper (Jiang & Singh, NeurIPS 2024), Appendix B.7, Table 24; 3 epochs, 5 seeds
+  pretr_linf: {clean: 83.7, linf: 48.1, l2: 59.8, l1: 7.7, union: 38.5}
+  ramp_l1.5:  {clean: 81.1, linf: 45.4, l2: 66.1, l1: 47.2, union: 43.1, std: {clean: 0.2, linf: 0.3, l2: 0.2, l1: 0.1, union: 0.2}}
+  ramp_l0.5:  {clean: 81.5, linf: 45.5, l2: 66.4, l1: 47.0, union: 42.9, std: {clean: 0.1, linf: 0.2, l2: 0.2, l1: 0.1, union: 0.2}}
+  eat:        {clean: 82.7, linf: 44.3, l2: 68.1, l1: 48.7, union: 42.2, std: {clean: 0.4, linf: 0.6, l2: 0.5, l1: 0.5, union: 0.8}}
+  max:        {clean: 82.2, linf: 45.2, l2: 67.0, l1: 46.1, union: 42.2, std: {clean: 0.3, linf: 0.4, l2: 0.7, l1: 0.4, union: 0.6}}
+
+scratch_table3:     # RAMP paper Table 3; 80 epochs from random init, 5 seeds (not feasible on Kaggle, see docs)
+  ramp_l5: {clean: 81.2, linf: 46.0, l2: 65.8, l1: 48.3, union: 44.6}
+  ramp_l2: {clean: 82.1, linf: 45.5, l2: 66.6, l1: 48.4, union: 44.0}
+
+thesis_table7_1:    # thesis "baseline reproduction", 5 runs; matches scratch_table3.ramp_l5 to <=0.1 pp
+  ramp: {clean: 81.3, linf: 45.96, l2: 65.74, l1: 48.42, union: 44.5}

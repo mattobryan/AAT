@@ -15,22 +15,21 @@ import torch
 
 from .attacks import perturb
 from .data import get_test_tensors
-from .models import build_model
+from .models import build_model, load_weights
 from .utils import device, load_config, set_seed
 
 AA_NORM = {"linf": "Linf", "l2": "L2", "l1": "L1"}
 
 
 def attack_batchwise(model, x, y, norm, eps, backend, attacks, bs, dev, pgd_steps):
+    x = x.contiguous()  # AutoAttack's l_1 projection calls .view()
+    x = x.contiguous()  # AutoAttack's l_1 projection calls .view()
     if backend == "autoattack":
+        # Exactly the RAMP / E-AT protocol (eval.py in both repos): AutoAttack 'standard' settings,
+        # restricted to APGD-CE + APGD-T. For l_1 this means 5 restarts, 5 target classes, large reps.
         from autoattack import AutoAttack
-        adv = AutoAttack(model, norm=AA_NORM[norm], eps=eps, version="custom",
-                         attacks_to_run=list(attacks), verbose=False, device=dev)
-        adv.apgd.n_restarts = 1
-        adv.apgd_targeted.n_target_classes = 9
-        if norm == "l1":  # as in AutoAttack's standard L1 setting
-            adv.apgd.use_largereps = True
-            adv.apgd_targeted.use_largereps = True
+        adv = AutoAttack(model, norm=AA_NORM[norm], eps=eps, version="standard", verbose=False, device=dev)
+        adv.attacks_to_run = list(attacks)
         x_adv = adv.run_standard_evaluation(x, y, bs=bs)
     else:
         x_adv = torch.cat([perturb(model, x[i:i + bs].to(dev), y[i:i + bs].to(dev), norm, eps,
@@ -45,15 +44,20 @@ def per_class(mask, y, C):
 
 
 def evaluate(run, backend="autoattack", attacks=("apgd-ce", "apgd-t"), n=None, bs=500, unseen=True,
-             unseen_attacks=("apgd-ce",), pgd_steps=50, tag=None):
-    cfg = load_config(os.path.join(run, "config.yaml"))
+             unseen_attacks=("apgd-ce",), pgd_steps=50, tag=None, ckpt=None, config=None, name=None):
+    """`run` is a run dir of ours (config.yaml + final.pt). For external checkpoints pass `ckpt`,
+    `config` (supplies model/eval settings) and `name`; results are written next to `run`."""
+    cfg = load_config(config or os.path.join(run, "config.yaml"))
+    if name:
+        cfg["name"] = name
+    os.makedirs(run, exist_ok=True)
     dev = device()
     set_seed(0)
     ecfg = cfg["eval"]
     n = n or ecfg["n"]
     C = 100 if cfg["data"]["dataset"] == "cifar100" else 10
     model = build_model(cfg["model"], cfg["data"]["dataset"]).to(dev)
-    model.load_state_dict(torch.load(os.path.join(run, "final.pt"), map_location=dev)["model"])
+    load_weights(model, ckpt or os.path.join(run, "final.pt"), map_location=dev)
     model.eval()
     x, y = get_test_tensors(cfg, n)
 
@@ -106,10 +110,13 @@ def main():
     ap.add_argument("--no-unseen", action="store_true")
     ap.add_argument("--pgd-steps", type=int, default=50)
     ap.add_argument("--tag", default=None)
+    ap.add_argument("--ckpt", default=None, help="external checkpoint (official RAMP/E-AT .pth); needs --config")
+    ap.add_argument("--config", default=None)
+    ap.add_argument("--name", default=None)
     a = ap.parse_args()
     for r in a.run:
         evaluate(r, a.backend, a.attacks.split(","), a.n, a.bs, not a.no_unseen,
-                 a.unseen_attacks.split(","), a.pgd_steps, a.tag)
+                 a.unseen_attacks.split(","), a.pgd_steps, a.tag, a.ckpt, a.config, a.name)
 
 
 if __name__ == "__main__":

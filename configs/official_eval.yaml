@@ -1,0 +1,5 @@
+# Evaluation settings for checkpoints produced by the official RAMP / E-AT code
+# (softplus PreActResNet-18, no input normalisation).
+base: base.yaml
+name: official
+model: preactresnet18_softplus
