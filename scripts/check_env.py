@@ -8,6 +8,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXT = os.path.join(ROOT, "external", "ramp")
+sys.path.insert(0, ROOT)
 
 checks = []
 
