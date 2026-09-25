@@ -29,6 +29,9 @@ install)
   git -C "$EXT" checkout -q $COMMIT
   # utils.gp() calls copy.deepcopy without importing copy (only reached with --gp, i.e. from-scratch runs)
   grep -q "^import copy" "$EXT/utils.py" || sed -i '1i import copy' "$EXT/utils.py"
+  # MAX.py imports gp/gp_finetune from pretrain.py, where they do not exist (unused in MAX.py); the one
+  # name it does use, get_params_no_decay, lives in utils.py
+  sed -i 's/^from pretrain import gp, get_params_no_decay, gp_finetune$/from utils import get_params_no_decay/' "$EXT/MAX.py"
   # resume + HF Hub sync for RAMP.py (reviewable diff: baselines/ramp_resume_hub.patch)
   git -C "$EXT" apply --check "$ROOT/baselines/ramp_resume_hub.patch" 2>/dev/null && git -C "$EXT" apply "$ROOT/baselines/ramp_resume_hub.patch"
   cp "$ROOT/aat/hub.py" "$EXT/hub_sync.py"

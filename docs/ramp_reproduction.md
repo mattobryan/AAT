@@ -23,6 +23,8 @@ A from-scratch run takes longer than one Kaggle session, so every run can pause 
 
   The method itself is untouched; the diff is limited to the resume/sync hooks. One missing
   `import copy` in `utils.py`, which crashes the `--gp` path, is also patched.
+  `MAX.py` imports `gp`, `gp_finetune` and `get_params_no_decay` from `pretrain.py`, where none of them
+  exist. It only uses `get_params_no_decay`, so the setup imports that from `utils.py` instead.
 * **`aat/hub.py`** does the syncing. It reads the token from the Kaggle secret `HF_TOKEN` and the
   repo from `HF_REPO`. The HF repo is created private. Resume checkpoints are overwritten in place
   and the history is squashed, so storage stays at roughly 200 MB per run rather than growing
