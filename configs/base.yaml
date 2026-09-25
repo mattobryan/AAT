@@ -18,6 +18,7 @@ train:
   weight_decay: 5.0e-4
   amp: true
   clip_grad: null
+  time_budget_h: 11          # stop cleanly before Kaggle's 12 h limit; re-run to resume (HF_REPO sync)
 
 norms: [linf, l2, l1]
 attack:                       # TRAINING attacks (cheap PGD); evaluation uses AutoAttack

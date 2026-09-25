@@ -1,62 +1,65 @@
-# Step 1: reproduce the RAMP baseline
+# Step 1: lock in the RAMP baseline
 
-Before building AAT, the baseline has to be reproduced from the **official code**
-([uiuc-focal-lab/RAMP](https://github.com/uiuc-focal-lab/RAMP), commit `be4971f`), with no
-reimplementation. Only after that does our own RAMP config (`configs/ramp.yaml`) need to match it.
+The method: reproduce the published numbers with the **official code**
+([uiuc-focal-lab/RAMP](https://github.com/uiuc-focal-lab/RAMP), pinned commit `be4971f`). That gives
+us RAMP's weights. Those weights and numbers become the fixed baseline that AAT is measured against.
 
-## Which RAMP numbers?
+## Targets (`baselines/targets.yaml`)
 
-| Source | Setting | Clean | ℓ∞ | ℓ2 | ℓ1 | Union |
+| Setting | Clean | ℓ∞ | ℓ2 | ℓ1 | Union | Role |
 |---|---|---|---|---|---|---|
-| RAMP paper, Table 24 (App. B.7) | RN-18 ℓ∞-AT **fine-tuned 3 epochs**, λ=1.5, 5 seeds | 81.1 | 45.4 | 66.1 | 47.2 | 43.1 |
-| RAMP paper, Table 3 | RN-18 **from scratch, 80 epochs**, λ=5, GP, 5 seeds | 81.2 | 46.0 | 65.8 | 48.3 | 44.6 |
-| Thesis, Table 7.1 | "baseline reproduction", 5 runs | 81.3 | 45.96 | 65.74 | 48.42 | 44.5 |
-| Starting point `pretr_Linf` | before fine-tuning | 83.7 | 48.1 | 59.8 | 7.7 | 38.5 |
+| **From scratch**, 80 ep, λ=5, GP (paper Table 3) | 81.2 | 46.0 | 65.8 | 48.3 | 44.6 | **Thesis baseline** (thesis Table 7.1: 81.3 / 45.96 / 65.74 / 48.42 / 44.5) |
+| Fine-tune `pretr_Linf` 3 ep, λ=1.5 (paper Table 24) | 81.1 | 45.4 | 66.1 | 47.2 | 43.1 | Cheap cross-check of the pipeline |
+| `pretr_Linf` (start point) | 83.7 | 48.1 | 59.8 | 7.7 | 38.5 | Sanity check of the evaluation |
 
-The thesis Table 7.1 averages match the paper's **from-scratch λ=5** row to within 0.1 pp in every
-column. That setting is out of reach on Kaggle: the paper reports 157 s/epoch on an A100, which is
-roughly 15–20 min/epoch on a T4 in fp32, or about 20–25 h per seed. That is longer than the 12 h
-Kaggle session limit, and the official script cannot resume. On top of that, the public code's `--gp`
-path crashes (`utils.gp` uses `copy` without importing it). We patch that one line.
+## How the 12-hour Kaggle limit is handled
 
-**The target is therefore Table 24 (fine-tuning).** It uses the same method, loss and evaluation. It
-starts from the official `pretr_Linf.pth` shipped in the repo and costs about 1 GPU-hour per seed.
-The from-scratch row stays as a stretch goal and is reported as such.
+A from-scratch run takes longer than one Kaggle session, so every run can pause and resume:
 
-## What has been verified (CPU, before this was paused)
+* **`baselines/ramp_resume_hub.patch`** (≈90 lines) adds to the official `RAMP.py`:
+  * `--resume`: restores both models, both optimizers, the stats, and all random-number-generator states.
+  * `--time_budget_h`: exits cleanly after the last epoch that fits in the session.
+  * `--hf_repo`: pushes the resume checkpoint, the logs, and `ep_*.pth` to Hugging Face after every epoch.
 
-* Our `preactresnet18_softplus` port reproduces the official model's logits to within 5e-7.
-* `pretr_Linf` scores **83.7 %** clean on the first 1,000 test points (82.8 % on all 10k). The
-  paper's 83.7 % means Table 24 uses the first-1,000-point protocol, so all evaluation here uses
-  `eval.n = 1000`.
-* `aat.evaluate` now uses the official evaluation settings: AutoAttack `version="standard"` restricted to
-  APGD-CE + APGD-T. For ℓ1 that means 5 restarts, 5 target classes and large reps, as in RAMP's `eval.py`.
+  The method itself is untouched; the diff is limited to the resume/sync hooks. One missing
+  `import copy` in `utils.py`, which crashes the `--gp` path, is also patched.
+* **`aat/hub.py`** does the syncing. It reads the token from the Kaggle secret `HF_TOKEN` and the
+  repo from `HF_REPO`. The HF repo is created private. Resume checkpoints are overwritten in place
+  and the history is squashed, so storage stays at roughly 200 MB per run rather than growing
+  every epoch. Failed uploads only print a warning; they never stop training.
+* **Our own trainer (`aat/train.py`)** does the same for AAT runs: it pulls `last.pt` at start, pushes
+  it after every epoch, and stops cleanly after `train.time_budget_h`.
 
-## Protocol (the official flags, from `scripts/cifar10/RAMP_finetune_cifar10.sh`)
+**Workflow:** in Kaggle, use *Save Version → Save & Run All*. The run continues in the background,
+and at 11 h it pushes its checkpoint and exits. Run the notebook again and it continues from the
+Hub. Finished runs are detected (the official final-eval log is on the Hub) and skipped.
 
-`RAMP.py --finetune_model --model_name pretr_Linf --epochs 3 --lr-max 0.05 --lr-schedule piecewise-ft --at_iter 10 --kl --max`
-with λ defaulting to 1.5, APGD-10 training attacks on ℓ∞ (source) and ℓ1 (target), CE on the
-per-sample worst case, and KL(p_ℓ∞ ‖ p_ℓ1) on the points ℓ∞ gets right. There is no GP in fine-tuning.
+## Verified so far (CPU)
 
-## Kaggle run order (`notebooks/ramp_baseline_kaggle.ipynb`)
+* Our `preactresnet18_softplus` port gives the same logits as the official model class, to within 5e-7.
+* `pretr_Linf` scores 83.7 % clean on the first 1,000 test points, matching the paper. So
+  evaluation uses the first 1,000 points, with AutoAttack `standard` settings restricted to
+  APGD-CE + APGD-T, the same as the official `eval.py`.
+* The patch applies cleanly to the pinned commit, and the patched script compiles.
 
-| Step | Command | Est. T4 time |
-|---|---|---|
-| Setup | `bash scripts/ramp_official.sh setup` | 3 min |
-| Sanity | `bash scripts/ramp_official.sh pretr 0` → expect ≈ 83.7 / 48.1 / 59.8 / 7.7 / 38.5 | 10 min |
-| RAMP ×5 seeds | `train ramp "0 2 4" 0` ‖ `train ramp "1 3" 1` | ~3 h wall |
-| Evaluate | `eval ramp "0 1 2 3 4"` | ~45 min |
-| Compare | `python scripts/compare_targets.py --map ramp_official_ft=ramp_l1.5 pretr_linf=pretr_linf` | – |
-| Optional | E-AT and MAX, 3 seeds each, same commands | ~4 h |
+## Kaggle order (`notebooks/ramp_baseline_kaggle.ipynb`)
 
-**Acceptance:** each metric within 1 pp of the paper mean (OK), or within 2 pp (CLOSE, report it with
-an explanation). Seed 0 also runs the official `--final_eval` on the same 1,000 points, so our
-evaluator can be checked against theirs directly.
+1. One-time: add an HF write token as the Kaggle secret `HF_TOKEN`, and set `HF_REPO`.
+2. Sanity: evaluate `pretr_Linf`.
+3. **A:** from-scratch RAMP, seeds 0 and 1 in parallel (one per GPU), resumed across sessions until
+   both are done. Then seeds 2–4 if the quota allows. The first logged epoch time tells you how
+   many sessions each seed needs.
+4. **B:** fine-tuning cross-check on leftover GPU time (5 seeds, about 1 GPU-h each).
+5. `compare_targets.py` marks each metric OK (≤1 pp), CLOSE (≤2 pp) or OFF.
 
-## After it passes
+Seed 0 also runs the official final evaluation on the same 1,000 points, so our evaluator
+is checked against theirs.
 
-1. Point `configs/base.yaml` at the official setup: `model: preactresnet18_softplus`,
-   `init_from: external/ramp/models/pretr_Linf.pth`, 3 epochs, `piecewise-ft` LR.
-2. Switch our training attacks to APGD so that `configs/ramp.yaml` reproduces the official
-   numbers. Only then do AAT differences mean something.
-3. Build AAT on top of that pipeline.
+## After the baseline is locked
+
+The baseline checkpoints live on the Hub under `ramp_official/<run>/ep_*.pth`.
+
+1. The main comparison: AAT trains from the same start as RAMP, under the same budget and the same
+   evaluation, so any gain comes from the adaptive ε and norm scheduling.
+2. Optional: AAT fine-tunes the RAMP weights. This needs a control where RAMP itself continues
+   for the same number of epochs.

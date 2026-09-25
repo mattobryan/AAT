@@ -12,6 +12,7 @@ import torch
 import torch.nn.functional as F
 import yaml
 
+from . import hub
 from .attacks import perturb
 from .data import get_loaders
 from .losses import aggregate, pairing_loss
@@ -170,6 +171,11 @@ def train(cfg):
 
     start = 0
     ck_path = os.path.join(out, "last.pt")
+    hub_prefix = f"aat/{os.path.basename(out)}/"
+    if not os.path.exists(ck_path):  # a previous session may have left it on the HF Hub
+        hub.pull(hub_prefix + "last.pt", ck_path)
+        hub.pull(hub_prefix + "log.jsonl", os.path.join(out, "log.jsonl"))
+    t_start, epoch_times = time.time(), []
     if os.path.exists(ck_path):  # resume across Kaggle sessions
         ck = torch.load(ck_path, map_location=dev)
         model.load_state_dict(ck["model"]); opt.load_state_dict(ck["opt"])
@@ -265,8 +271,17 @@ def train(cfg):
         torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "lr_sched": lr_sched.state_dict(),
                     "scaler": scaler.state_dict(), "eps_state": eps_s.state, "eps_ema": eps_s.class_rob_ema,
                     "norm_probs": norm_s.probs, "norm_loss_gap": norm_s.loss_gap, "epoch": epoch}, ck_path)
+        hub.push(ck_path, hub_prefix + "last.pt")
+        hub.push(os.path.join(out, "log.jsonl"), hub_prefix + "log.jsonl")
+        epoch_times.append(time.time() - t0)
+        budget = t.get("time_budget_h", 0)
+        if budget and epoch + 1 < t["epochs"] and time.time() - t_start + 1.3 * max(epoch_times) > budget * 3600:
+            print(f"time budget reached after epoch {epoch + 1}; re-run the same command to resume")
+            return out
 
     torch.save({"model": model.state_dict()}, os.path.join(out, "final.pt"))
+    for f in ("final.pt", "config.yaml", "log.jsonl"):
+        hub.push(os.path.join(out, f), hub_prefix + f)
     print(f"done -> {out}")
     return out
 

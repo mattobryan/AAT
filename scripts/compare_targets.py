@@ -1,7 +1,7 @@
 """Compare our evaluated runs with the published numbers in baselines/targets.yaml.
 
     python scripts/compare_targets.py --runs runs_official --table finetune_table24 \
-        --map ramp_official_ft=ramp_l1.5 eat_official_ft=eat max_official_ft=max pretr_linf=pretr_linf
+        --map ramp_official=ramp_l1.5 eat_official=eat max_official=max pretr_linf=pretr_linf
 
 Verdict per metric: OK |delta| <= 1.0 pp, CLOSE <= 2.0 pp, OFF otherwise.
 """
