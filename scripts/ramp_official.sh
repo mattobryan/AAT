@@ -57,7 +57,8 @@ train)
     [ -f "trained_models/$fname/log_eval_final.txt" ] && { echo "done already: $fname"; continue; }
     fe="--final_eval --n_ex_final 1000"   # official eval on the same 1000 points, to cross-check ours
     echo ">> $fname on GPU $gpu"
-    CUDA_VISIBLE_DEVICES=$gpu python $script $common $extra $fe --seed $s --fname $fname 2>&1 | grep -v "it/s\]" > "$ROOT/logs_official_$fname.txt"
+    CUDA_VISIBLE_DEVICES=$gpu python -u $script $common $extra $fe --seed $s --fname $fname 2>&1 \
+      | grep --line-buffered -v "it/s\]" | sed -u "s/^/[$fname] /" | tee "$ROOT/logs_official_$fname.txt"
   done
   ;;
 eval)
