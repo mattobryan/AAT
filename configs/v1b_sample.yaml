@@ -1,0 +1,7 @@
+# 1B: static multi-norm + per-sample, class-aware eps (Eq. A.1: input-gradient norm + class robustness EMA).
+base: base.yaml
+name: v1b_sample
+eps:
+  linf: {mode: sample, min_frac: 0.5, max_frac: 1.25, lam: 2.0}
+  l2: {mode: sample, min_frac: 0.5, max_frac: 1.25, lam: 2.0}
+  l1: {mode: sample, min_frac: 0.5, max_frac: 1.25, lam: 2.0}

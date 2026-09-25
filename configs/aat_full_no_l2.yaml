@@ -1,0 +1,4 @@
+# Unseen-norm test: full AAT trained on l_inf + l_1 only (same norms as RAMP / E-AT); l_2 is held out.
+base: aat_full.yaml
+name: aat_full_no_l2
+norms: [linf, l1]

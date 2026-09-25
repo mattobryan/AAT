@@ -1,0 +1,8 @@
+# Stage 0: one shared l_inf-AT PreActResNet-18 that every variant fine-tunes from.
+base: base.yaml
+name: pretrain_linf
+init_from: null
+norms: [linf]
+train: {epochs: 30, lr: 0.2, lr_schedule: onecycle}
+attack: {linf: {steps: 5}}
+monitor: {every: 5, n: 500, steps: 10}

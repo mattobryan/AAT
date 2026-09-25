@@ -1,0 +1,7 @@
+# 1A: static multi-norm (MAX) + global linear eps ramp (RAMP-style curriculum, no feedback).
+base: base.yaml
+name: v1a_linear
+eps:
+  linf: {mode: linear, start_frac: 0.25, ramp_epochs: 5}
+  l2: {mode: linear, start_frac: 0.25, ramp_epochs: 5}
+  l1: {mode: linear, start_frac: 0.25, ramp_epochs: 5}

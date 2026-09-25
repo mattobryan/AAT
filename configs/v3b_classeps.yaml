@@ -1,0 +1,7 @@
+# 3B: static multi-norm + class-wise feedback eps controller (Eq. 4.19), targets robust acc tau at current eps.
+base: base.yaml
+name: v3b_classeps
+eps:
+  linf: {mode: class_feedback, init_frac: 0.75, min_frac: 0.5, max_frac: 1.25, alpha: 0.05, tau: 0.5}
+  l2: {mode: class_feedback, init_frac: 0.75, min_frac: 0.5, max_frac: 1.25, alpha: 0.05, tau: 0.6}
+  l1: {mode: class_feedback, init_frac: 0.75, min_frac: 0.5, max_frac: 1.25, alpha: 0.05, tau: 0.5}

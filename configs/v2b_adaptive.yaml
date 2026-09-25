@@ -1,0 +1,4 @@
+# 2B: one norm per batch, Boltzmann sampling pi_p ~ exp(-gamma R_p) on feedback robustness (Eq. 4.20).
+base: base.yaml
+name: v2b_adaptive
+norm_schedule: {mode: adaptive, gamma: 2.0, floor: 0.1}

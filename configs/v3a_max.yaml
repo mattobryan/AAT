@@ -1,0 +1,3 @@
+# 3A / MAX baseline: all three norms every batch, fixed eps, per-sample worst case (Eq. A.4).
+base: base.yaml
+name: v3a_max

@@ -1,0 +1,8 @@
+# Baseline: RAMP (Jiang & Singh, 2024) — l_inf + l_1, max-CE + KL logit pairing + gradient projection.
+# l_2 is never trained on, so it is an unseen norm for this run.
+# TODO(day 1): check lambda_kl / beta / GP form against github.com/uiuc-focal-lab/RAMP.
+base: base.yaml
+name: ramp
+norms: [linf, l1]
+loss: {aggregate: max, lambda_kl: 2.0}
+gp: {enabled: true, beta: 0.5, mode: project}

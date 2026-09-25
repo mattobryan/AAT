@@ -1,0 +1,45 @@
+# Shared defaults. Every other config sets `base: base.yaml` and overrides what differs.
+name: base
+seed: 0
+out_dir: runs
+init_from: runs/pretrain_linf_s0/final.pt   # fine-tuning protocol (RAMP / E-AT style)
+model: preactresnet18
+limit_batches: null                          # set e.g. 20 for timing / smoke runs
+
+data: {dataset: cifar10, root: ./data, feedback_size: 1000, num_workers: 4, split_seed: 0}
+
+train:
+  epochs: 10
+  batch_size: 128
+  lr: 0.05
+  lr_schedule: cosine
+  warmup_epochs: 0
+  momentum: 0.9
+  weight_decay: 5.0e-4
+  amp: true
+  clip_grad: null
+
+norms: [linf, l2, l1]
+attack:                       # TRAINING attacks (cheap PGD); evaluation uses AutoAttack
+  linf: {steps: 5}
+  l2: {steps: 5}
+  l1: {steps: 10, sparsity: 0.95}
+
+eps:
+  linf: {nominal: 8/255, mode: static}
+  l2: {nominal: 0.5, mode: static}
+  l1: {nominal: 12.0, mode: static}
+
+norm_schedule: {mode: all}
+loss: {aggregate: max, lambda_kl: 0.0, lambda_sec: 0.5, lambda_clean: 0.0}
+gp: {enabled: false, beta: 0.5, mode: project}
+feedback: {every: 1, steps: 10, at_start: true}
+monitor: {every: 2, n: 500, steps: 10}
+
+eval:
+  n: 1000
+  seen: {linf: 8/255, l2: 0.5, l1: 12.0}
+  unseen:
+    linf: [4/255, 12/255, 16/255]
+    l2: [0.25, 1.0, 1.5]
+    l1: [6.0, 18.0, 24.0]

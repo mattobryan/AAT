@@ -1,0 +1,6 @@
+# Full AAT (thesis 3C / Ch. 4): class-feedback eps + adaptive norm loss weights + hybrid loss (Eq. 4.8)
+# + KL cross-norm pairing (Eq. 4.16).
+base: v3b_classeps.yaml
+name: aat_full
+norm_schedule: {mode: all_adaptive, gamma: 2.0, floor: 0.1}
+loss: {aggregate: hybrid, lambda_sec: 0.5, lambda_kl: 0.5}

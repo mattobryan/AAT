@@ -1,0 +1,6 @@
+# Baseline: E-AT (Croce & Hein, 2022) — one of the extreme norms l_1 / l_inf per batch,
+# sampled proportionally to robust error.
+base: base.yaml
+name: eat
+norms: [linf, l1]
+norm_schedule: {mode: error, floor: 0.0}

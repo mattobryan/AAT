@@ -1,0 +1,4 @@
+# 2A: one norm per batch, round-robin, fixed eps.
+base: base.yaml
+name: v2a_cyclic
+norm_schedule: {mode: cyclic, cycle_unit: batch, period: 1}

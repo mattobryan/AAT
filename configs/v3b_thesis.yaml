@@ -1,0 +1,7 @@
+# 3B exactly as printed in thesis Eq. A.5 (label-index eps, up to 1.45x nominal). Faithfulness check only.
+base: base.yaml
+name: v3b_thesis
+eps:
+  linf: {mode: class_index}
+  l2: {mode: class_index}
+  l1: {mode: class_index}
