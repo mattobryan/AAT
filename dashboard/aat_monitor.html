@@ -1,0 +1,260 @@
+<title>AAT Run Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #F3F6F4; --surface: #FFFFFF; --ink: #16201C; --muted: #5C6963; --line: #DCE3DF;
+    --accent: #0E6B73; --accent-ink: #FFFFFF; --track: #E6ECE9;
+    --linf: #2F6FD6; --l2: #B06F12; --l1: #8750C4; --union: #16201C; --clean: #7C8883;
+    --ok: #267A4C; --ok-bg: #E3F2E9; --warn: #A35F00; --warn-bg: #FBEEDB; --run: #0E6B73; --run-bg: #DFF0F1;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0F1513; --surface: #171F1C; --ink: #E4EBE7; --muted: #97A39D; --line: #28332F;
+      --accent: #4DB0B8; --accent-ink: #0F1513; --track: #24302C;
+      --linf: #74A2F2; --l2: #E0A548; --l1: #B58CEB; --union: #E4EBE7; --clean: #8C9892;
+      --ok: #5DC08A; --ok-bg: #173325; --warn: #EBAA4E; --warn-bg: #3A2A12; --run: #4DB0B8; --run-bg: #14302F;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0F1513; --surface: #171F1C; --ink: #E4EBE7; --muted: #97A39D; --line: #28332F;
+    --accent: #4DB0B8; --accent-ink: #0F1513; --track: #24302C;
+    --linf: #74A2F2; --l2: #E0A548; --l1: #B58CEB; --union: #E4EBE7; --clean: #8C9892;
+    --ok: #5DC08A; --ok-bg: #173325; --warn: #EBAA4E; --warn-bg: #3A2A12; --run: #4DB0B8; --run-bg: #14302F;
+  }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.5; }
+  .wrap { max-width: 980px; margin: 0 auto; padding-inline: 18px; padding-block: 22px 40px; display: grid; gap: 20px; }
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; }
+  h1 { font-size: 1.55rem; font-weight: 700; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  .sub { color: var(--muted); font-size: 0.86rem; margin: 2px 0 0; }
+  .sub .mono { color: var(--ink); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  button { font: 600 0.9rem var(--sans); background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px;
+           padding: 9px 14px; cursor: pointer; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button:focus-visible { outline: 3px solid var(--linf); outline-offset: 2px; }
+  .hint { font-size: 0.82rem; color: var(--muted); max-width: 34ch; }
+  .notice { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 14px 16px; display: grid; gap: 6px; }
+  .notice strong { font-weight: 600; }
+  .notice ol { margin: 0; padding-left: 1.2em; color: var(--muted); }
+  .notice code { font-family: var(--mono); font-size: 0.85em; color: var(--ink); }
+  .runs { display: grid; gap: 16px; }
+  .run { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 14px; }
+  .run-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+  .run-name { font: 600 1rem var(--mono); overflow-wrap: anywhere; }
+  .pill { font: 600 0.72rem var(--sans); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; }
+  .pill.running { color: var(--run); background: var(--run-bg); }
+  .pill.STALLED { color: var(--warn); background: var(--warn-bg); }
+  .pill.DONE { color: var(--ok); background: var(--ok-bg); }
+  .action { color: var(--warn); font-weight: 600; font-size: 0.88rem; }
+  .bar { height: 10px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.6s ease; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px 16px; margin: 0; }
+  .stats div { display: grid; gap: 1px; }
+  .stats dt { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .stats dd { margin: 0; font: 500 1.05rem var(--mono); font-variant-numeric: tabular-nums; }
+  .charts { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr); gap: 14px; }
+  @media (max-width: 640px) { .charts { grid-template-columns: minmax(0, 1fr); } }
+  figure { margin: 0; display: grid; gap: 6px; }
+  figcaption { font-size: 0.78rem; color: var(--muted); }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.78rem; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  .final { font-size: 0.86rem; }
+  .empty-chart { font-size: 0.82rem; color: var(--muted); padding: 18px 0; }
+  footer { color: var(--muted); font-size: 0.8rem; display: grid; gap: 4px; }
+  @media (prefers-reduced-motion: reduce) { .bar > span { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>AAT Run Monitor</h1>
+      <p class="sub" id="updated">Waiting for the first report from the hourly monitor.</p>
+    </div>
+    <div class="actions">
+      <button id="refresh" type="button" hidden>Refresh now</button>
+      <span class="hint" id="refresh-hint" hidden>Runs the monitor once. The new report appears here in about 2 minutes.</span>
+    </div>
+  </header>
+
+  <div class="notice" id="notice" hidden></div>
+
+  <section class="runs" id="runs" aria-live="polite"></section>
+
+  <footer>
+    <span>Fixed evaluation budgets: <span class="mono">ℓ∞ 8/255 · ℓ2 0.5 · ℓ1 12</span>. Curves are the in-training check (200 test points, APGD-100); final numbers come from AutoAttack on 1,000 points.</span>
+    <span>Dotted line: thesis Table 7.1 RAMP union, <span class="mono">44.5%</span>.</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const TRIGGER_ID = "trig_01WpyYX24gXUywpKi4NA1gqs";
+  const TARGET_UNION = 44.5;
+  const SERIES = [
+    { key: "clean", label: "clean", color: "var(--clean)", dash: "4 3", w: 1.6 },
+    { key: "linf", label: "ℓ∞", color: "var(--linf)", w: 1.8 },
+    { key: "l2", label: "ℓ2", color: "var(--l2)", w: 1.8 },
+    { key: "l1", label: "ℓ1", color: "var(--l1)", w: 1.8 },
+    { key: "union", label: "union", color: "var(--union)", w: 2.8 },
+  ];
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let lastReport = null;
+
+  function ago(stamp) {
+    if (!stamp) return "";
+    const t = Date.parse(stamp.replace(" ", "T") + ":00Z");
+    if (Number.isNaN(t)) return stamp;
+    const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    const local = new Date(t).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+    const rel = m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ${m % 60} min ago`;
+    return `${rel} (${local})`;
+  }
+
+  function accChart(run) {
+    const pts = run.acc || [];
+    const total = run.total || Math.max(1, ...pts.map((p) => p.epoch));
+    if (!pts.length) return `<p class="empty-chart">Test accuracy is logged every 10 epochs for from-scratch runs. The first point appears at epoch 10.</p>`;
+    const W = 560, H = 220, L = 34, R = 10, T = 10, B = 24;
+    const x = (e) => L + (e / total) * (W - L - R);
+    const y = (v) => T + (1 - v / 100) * (H - T - B);
+    let g = "";
+    for (const v of [0, 25, 50, 75, 100]) {
+      g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>`;
+      g += `<text x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end">${v}</text>`;
+    }
+    const ticks = total <= 10 ? Array.from({ length: total + 1 }, (_, i) => i) : [0, 20, 40, 60, 80].filter((t) => t <= total);
+    for (const t of ticks) g += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle">${t}</text>`;
+    g += `<line x1="${L}" x2="${W - R}" y1="${y(TARGET_UNION)}" y2="${y(TARGET_UNION)}" stroke="var(--union)" stroke-width="1" stroke-dasharray="1 4"/>`;
+    for (const s of SERIES) {
+      const ps = pts.filter((p) => typeof p[s.key] === "number");
+      if (!ps.length) continue;
+      const d = ps.map((p, i) => `${i ? "L" : "M"}${x(p.epoch).toFixed(1)},${y(p[s.key]).toFixed(1)}`).join("");
+      g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.w}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""} stroke-linejoin="round" stroke-linecap="round"/>`;
+      const last = ps[ps.length - 1];
+      g += `<circle cx="${x(last.epoch)}" cy="${y(last[s.key])}" r="${s.key === "union" ? 3.6 : 2.6}" fill="${s.color}"/>`;
+    }
+    const legend = SERIES.map((s) => `<span><i style="background:${s.color}"></i>${s.label}</span>`).join("");
+    const last = pts[pts.length - 1];
+    return `<figure><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Test accuracy by epoch for ${esc(run.run)}">${g}</svg>
+      <div class="legend">${legend}</div>
+      <figcaption>Accuracy (%) by epoch. Latest, epoch ${last.epoch}: union ${fmt(last.union)}, ℓ∞ ${fmt(last.linf)}, ℓ2 ${fmt(last.l2)}, ℓ1 ${fmt(last.l1)}, clean ${fmt(last.clean)}.</figcaption></figure>`;
+  }
+
+  function lossChart(run) {
+    const pts = run.loss || [];
+    if (pts.length < 2) return `<p class="empty-chart">The loss curve starts after the second epoch.</p>`;
+    const total = run.total || pts[pts.length - 1].epoch;
+    const W = 260, H = 120, L = 34, R = 8, T = 10, B = 22;
+    const vals = pts.map((p) => p.loss);
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (hi - lo < 1e-6) { hi += 0.05; lo -= 0.05; }
+    const x = (e) => L + (e / total) * (W - L - R);
+    const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    const line = pts.map((p, i) => `${i ? "L" : "M"}${x(p.epoch).toFixed(1)},${y(p.loss).toFixed(1)}`).join("");
+    const area = `${line}L${x(pts[pts.length - 1].epoch).toFixed(1)},${H - B}L${x(pts[0].epoch).toFixed(1)},${H - B}Z`;
+    const last = pts[pts.length - 1];
+    const g = `<line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--line)"/>
+      <text x="${L - 6}" y="${y(hi) + 3.5}" text-anchor="end">${hi.toFixed(2)}</text>
+      <text x="${L - 6}" y="${y(lo) + 3.5}" text-anchor="end">${lo.toFixed(2)}</text>
+      <text x="${L}" y="${H - 6}">0</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${total}</text>
+      <path d="${area}" fill="var(--accent)" fill-opacity="0.12"/>
+      <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round"/>
+      <circle cx="${x(last.epoch)}" cy="${y(last.loss)}" r="3" fill="var(--accent)"/>`;
+    return `<figure><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Training loss by epoch">${g}</svg>
+      <figcaption>Training loss. Epoch ${last.epoch}: <span class="mono">${last.loss.toFixed(4)}</span></figcaption></figure>`;
+  }
+
+  const fmt = (v) => (typeof v === "number" ? `${v.toFixed(1)}%` : "–");
+
+  function runCard(run) {
+    const pct = run.total ? Math.min(100, (100 * run.done) / run.total) : 0;
+    const state = ["running", "STALLED", "DONE"].includes(run.state) ? run.state : "running";
+    const label = { running: "Running", STALLED: "Stalled", DONE: "Done" }[state];
+    const f = run.final;
+    return `<article class="run">
+      <div class="run-head">
+        <span class="run-name">${esc(run.run)}</span>
+        <span class="pill ${state}">${label}</span>
+      </div>
+      ${state === "STALLED" ? `<p class="action" style="margin:0">No update for ${run.last_push_min} min. The Kaggle session has probably ended: re-run the notebook to resume.</p>` : ""}
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${run.total || 0}" aria-valuenow="${run.done}"><span style="width:${pct}%"></span></div>
+      <dl class="stats">
+        <div><dt>Epoch</dt><dd>${run.done} / ${run.total ?? "?"}</dd></div>
+        <div><dt>Per epoch</dt><dd>${run.min_per_epoch ? run.min_per_epoch + " min" : "–"}</dd></div>
+        <div><dt>Remaining</dt><dd>${run.eta_h ? run.eta_h + " GPU-h" : state === "DONE" ? "0" : "–"}</dd></div>
+        <div><dt>Last update</dt><dd>${Number.isFinite(run.last_push_min) ? run.last_push_min + " min ago" : "–"}</dd></div>
+      </dl>
+      ${f ? `<p class="final mono" style="margin:0">AutoAttack: clean ${fmt(f.clean)} · ℓ∞ ${fmt(f.linf)} · ℓ2 ${fmt(f.l2)} · ℓ1 ${fmt(f.l1)} · union ${fmt(f.union)}</p>` : ""}
+      <div class="charts">${accChart(run)}${lossChart(run)}</div>
+    </article>`;
+  }
+
+  function render(report) {
+    lastReport = report;
+    $("updated").innerHTML = report
+      ? `Last report ${esc(ago(report.generated_at))} · <span class="mono">${esc(report.repo || "")}</span>`
+      : "Waiting for the first report from the hourly monitor.";
+    const n = $("notice");
+    const runs = (report && report.runs) || [];
+    if (!report) {
+      n.hidden = false;
+      n.innerHTML = `<strong>No report yet.</strong><ol>
+        <li>Add <code>HF_TOKEN</code> (read token) and <code>HF_REPO</code> = <code>matokebryan/aat-checkpoints</code> to the Claude cloud environment.</li>
+        <li>The monitor runs hourly and writes its report here. <em>Refresh now</em> runs it immediately.</li></ol>`;
+    } else if (report.message && !runs.length) {
+      n.hidden = false;
+      n.innerHTML = `<strong>${esc(report.message)}</strong>`;
+    } else {
+      n.hidden = true;
+    }
+    $("runs").innerHTML = runs.map(runCard).join("");
+  }
+
+  render(null);
+  setInterval(() => lastReport && render(lastReport), 60000);  // keep "minutes ago" honest
+
+  (async () => {
+    const db = await claude.use("db");
+    if (!db) return;
+    db.doc("status/latest").onSnapshot(
+      (snap) => render(snap.exists ? snap.data() : null),
+      () => { $("updated").textContent = "Could not load the latest report. Reload the page to retry."; }
+    );
+  })();
+
+  (async () => {
+    const mcp = await claude.use("mcp");
+    if (!mcp) return;
+    const btn = $("refresh"), hint = $("refresh-hint");
+    btn.hidden = false; hint.hidden = false;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = "Requesting…";
+      try {
+        await mcp.callTool("Claude Code Remote", "fire_trigger", { trigger_id: TRIGGER_ID });
+        btn.textContent = "Requested";
+        hint.textContent = "The monitor is running. The new report appears here in about 2 minutes.";
+      } catch (e) {
+        const code = e && e.code;
+        hint.textContent = code === "not_granted" || code === "consent_required"
+          ? "Refresh needs permission to use Claude Code Remote. Allow it and try again."
+          : code === "rate_limited" ? "Too many requests. Wait a few minutes, then try again."
+          : "The monitor could not be started. The hourly report still runs.";
+        btn.textContent = "Refresh now";
+      } finally {
+        setTimeout(() => { btn.disabled = false; btn.textContent = "Refresh now"; }, 120000);
+      }
+    });
+  })();
+})();
+</script>
