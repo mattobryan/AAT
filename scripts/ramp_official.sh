@@ -106,7 +106,12 @@ train2|eval2)
   ;;
 pretr)
   gpu=${1:-0}
+  OUT="$ROOT/runs_official/pretr_linf/eval_autoattack.json"
+  # done in an earlier session? then reuse that result instead of spending ~26 GPU-minutes again
+  [ -f "$OUT" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" ramp_official/pretr_linf/eval_autoattack.json "$OUT" || true
+  if [ -f "$OUT" ]; then echo "sanity already evaluated: $OUT"; exit 0; fi
   CUDA_VISIBLE_DEVICES=$gpu python -m aat.evaluate --run "$ROOT/runs_official/pretr_linf" \
     --ckpt "$EXT/models/pretr_Linf.pth" --config "$ROOT/configs/official_eval.yaml" --name pretr_linf
+  python "$ROOT/aat/hub.py" push "${HF_REPO:-none}" "$OUT" ramp_official/pretr_linf/eval_autoattack.json || true
   ;;
 esac
