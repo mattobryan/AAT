@@ -1,0 +1,25 @@
+{
+ "name": "pretr_linf",
+ "clean": 0.8370000123977661,
+ "robust": {
+  "linf": 0.48100000619888306,
+  "l2": 0.5979999899864197,
+  "l1": 0.06499999761581421
+ },
+ "union": 0.06499999761581421,
+ "union_worst_class": 0.0,
+ "backend": "autoattack",
+ "n": 1000,
+ "note": "reconstructed from logs/sanity.txt (session 2026-09-25); summary fields only",
+ "unseen": {
+  "linf@0.01569": 0.697,
+  "linf@0.04706": 0.3,
+  "linf@0.06275": 0.144,
+  "l2@0.25": 0.747,
+  "l2@1": 0.288,
+  "l2@1.5": 0.075,
+  "l1@6": 0.305,
+  "l1@18": 0.01,
+  "l1@24": 0.003
+ }
+}
