@@ -1,23 +1,47 @@
 diff --git a/RAMP.py b/RAMP.py
-index 150083c..5f68b3c 100755
+index 150083c..51fd4a9 100755
 --- a/RAMP.py
 +++ b/RAMP.py
-@@ -81,6 +81,14 @@ def parse_args():
+@@ -81,10 +81,38 @@ def parse_args():
      parser.add_argument('--time_budget_h', type=float, default=0., help='exit cleanly before this many hours (0 = off)')
      parser.add_argument('--hf_repo', type=str, default=None, help='HF Hub repo id (default: env HF_REPO)')
  
 +    # [aat patch] adaptive per-class epsilon curriculum for the training attacks (Eq. 4.19)
 +    parser.add_argument('--aat', action='store_true', help='per-class adaptive eps for the Linf and L1 training attacks')
-+    parser.add_argument('--aat_init_frac', type=float, default=0.75)
++    parser.add_argument('--aat_relative', action='store_true', help='budget-neutral: A_c - mean(A), mean_c eps_c == nominal')
++    parser.add_argument('--aat_init_frac', type=float, default=None, help='default 0.75 (1.0 with --aat_relative)')
 +    parser.add_argument('--aat_min_frac', type=float, default=0.5)
-+    parser.add_argument('--aat_max_frac', type=float, default=1.25)
++    parser.add_argument('--aat_max_frac', type=float, default=None, help='default 1.25 (1.5 with --aat_relative)')
 +    parser.add_argument('--aat_alpha', type=float, default=0.05)
 +    parser.add_argument('--aat_tau', type=float, default=0.5)
 +
      args = parser.parse_args()
++    if args.aat_init_frac is None:  # [aat patch]
++        args.aat_init_frac = 1.0 if args.aat_relative else 0.75
++    if args.aat_max_frac is None:
++        args.aat_max_frac = 1.5 if args.aat_relative else 1.25
      return args
  
-@@ -223,6 +231,11 @@ def main():
+ 
++def aat_project_mean(eps, nominal, lo, hi):
++    # [aat patch] make mean_c(eps_c) == nominal inside [lo, hi]: rescale+clamp, then exact additive shift on unclamped classes
++    for _ in range(10):
++        eps = (eps * nominal / eps.mean()).clamp(lo, hi)
++    for _ in range(50):
++        diff = nominal - eps.mean()
++        if diff.abs() < 1e-8 * nominal:
++            break
++        free = (eps < hi) if diff > 0 else (eps > lo)
++        if free.sum() == 0:
++            break
++        eps = torch.where(free, eps + diff * eps.numel() / free.sum(), eps).clamp(lo, hi)
++    return eps
++
++
+ def main():
+     args = parse_args()
+ 
+@@ -223,6 +251,11 @@ def main():
      resume_path = run_dir + '/resume.pth'
      hub_prefix = 'ramp_official/{}/'.format(args.fname)
      start_epoch, epoch_times = 0, []
@@ -29,7 +53,7 @@ index 150083c..5f68b3c 100755
      if args.resume:
          if not os.path.exists(resume_path):
              hub_sync.pull(hub_prefix + 'resume.pth', resume_path, args.hf_repo)
-@@ -238,6 +251,8 @@ def main():
+@@ -238,6 +271,8 @@ def main():
              torch.cuda.set_rng_state_all(ck['rng_cuda'])
              random.setstate(ck['rng_py'])
              start_epoch = ck['epoch'] + 1
@@ -38,7 +62,7 @@ index 150083c..5f68b3c 100755
              print('[aat patch] resumed after epoch {}'.format(start_epoch))
  
      for epoch in range(start_epoch, args.epochs):  # loop over the dataset multiple times
-@@ -259,6 +274,9 @@ def main():
+@@ -259,6 +294,9 @@ def main():
                  running_loss_t = 0.0
                  running_acc_ep_s = 0.
                  running_acc_ep_t = 0.
@@ -48,7 +72,7 @@ index 150083c..5f68b3c 100755
                  for i, (x_loader, y_loader) in enumerate(tepoch):
                      x, y = x_loader.cuda(), y_loader.cuda()
  
-@@ -269,11 +287,20 @@ def main():
+@@ -269,11 +307,20 @@ def main():
                      model.eval()
  
                      # compute training points
@@ -74,7 +98,7 @@ index 150083c..5f68b3c 100755
                      
                      
                      y_tr = y.long().clone()
-@@ -346,6 +373,17 @@ def main():
+@@ -346,6 +393,25 @@ def main():
                          
                      tepoch.set_postfix({'loss': running_loss_t / (i+1), 'acc_s': running_acc_ep_s / (i + 1) / args.batch_size, 'acc_t': running_acc_ep_t / (i + 1) / args.batch_size})
              
@@ -83,16 +107,24 @@ index 150083c..5f68b3c 100755
 +                # [aat patch] Eq. 4.19 at epoch end: eps_c <- clamp(eps_c + alpha*(A_c - tau)*nominal, min, max)
 +                aat_line = '[aat-eps] after epoch {}'.format(epoch + 1)
 +                for nm in aat_norms:
-+                    A = torch.where(aat_cnt > 0, aat_hit[nm] / aat_cnt.clamp(min=1), torch.full_like(aat_cnt, args.aat_tau))
-+                    aat_eps[nm] = (aat_eps[nm] + args.aat_alpha * (A - args.aat_tau) * aat_nom[nm]).clamp(
++                    present = aat_cnt > 0
++                    A_c = aat_hit[nm] / aat_cnt.clamp(min=1)
++                    ref = A_c[present].mean() if args.aat_relative else args.aat_tau  # A_bar (relative) or tau (absolute)
++                    A = torch.where(present, A_c, torch.full_like(aat_cnt, float(ref)))
++                    aat_eps[nm] = (aat_eps[nm] + args.aat_alpha * (A - ref) * aat_nom[nm]).clamp(
 +                        args.aat_min_frac * aat_nom[nm], args.aat_max_frac * aat_nom[nm])
++                    if args.aat_relative:
++                        aat_eps[nm] = aat_project_mean(aat_eps[nm], aat_nom[nm], args.aat_min_frac * aat_nom[nm],
++                                                       args.aat_max_frac * aat_nom[nm])
 +                    aat_line += ' | {} A_c {} eps_c/nominal {}'.format(nm, ' '.join('{:.3f}'.format(v) for v in A.tolist()),
 +                        ' '.join('{:.4f}'.format(v) for v in (aat_eps[nm] / aat_nom[nm]).tolist()))
++                    if args.aat_relative:
++                        aat_line += ' mean_eps/nominal {:.6f}'.format((aat_eps[nm].mean() / aat_nom[nm]).item())
 +
              if args.gp:
                  # model fusion using GP
                  st = time.time()
-@@ -394,12 +432,15 @@ def main():
+@@ -394,12 +460,15 @@ def main():
              
  
          logger.log(str_to_log)

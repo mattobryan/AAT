@@ -71,3 +71,6 @@ to reproduce. Page numbers refer to the PDF.
 14. **Run-vs-run comparisons must check that the protocol matches.** `scripts/compare_runs.py`
     must refuse to compare files whose `n`, `backend`, `attacks` or `unseen` grid differ. With two
     seeds per arm, differences are descriptive only.
+    Addressed by `--aat_relative` (method `aat_rel`): ε moves with A_c − mean_c A_c and is projected
+    so that mean_c ε_c = nominal (to fp32 precision, ~3e-7 relative) inside [0.5, 1.5]×nominal. The
+    mean training budget then matches RAMP, but per-class ε still differs, so results remain descriptive.
