@@ -44,7 +44,9 @@ def official_ramp():
         raise FileNotFoundError("models/pretr_Linf.pth missing")
     if "[aat patch]" not in open(os.path.join(EXT, "RAMP.py")).read():
         raise RuntimeError("resume/HF patch not applied to RAMP.py")
-    return "RAMP.py, eat_train.py, MAX.py, eval.py import; patch applied; pretr_Linf.pth present"
+    if "--aat" not in open(os.path.join(EXT, "RAMP.py")).read() or "[aat patch]" not in open(os.path.join(EXT, "autopgd_train.py")).read():
+        raise RuntimeError("AAT patch (baselines/aat_on_ramp.patch) not applied to RAMP.py / autopgd_train.py")
+    return "RAMP.py, eat_train.py, MAX.py, eval.py import; patches applied; pretr_Linf.pth present"
 
 
 check("official RAMP code", official_ramp)

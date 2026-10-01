@@ -13,7 +13,7 @@ import os
 import re
 import sys
 
-EPOCHS = {"ramp_scratch": 80}  # everything else defaults to the 3-epoch fine-tuning protocol
+EPOCHS = {"ramp_scratch": 80, "aat_ramp": 80}  # everything else defaults to the 3-epoch fine-tuning protocol
 
 
 PCT = re.compile(r"(Linf|L2|L1|clean|union) ([\d.]+)%")

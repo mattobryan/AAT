@@ -1,0 +1,143 @@
+diff --git a/RAMP.py b/RAMP.py
+index 150083c..5f68b3c 100755
+--- a/RAMP.py
++++ b/RAMP.py
+@@ -81,6 +81,14 @@ def parse_args():
+     parser.add_argument('--time_budget_h', type=float, default=0., help='exit cleanly before this many hours (0 = off)')
+     parser.add_argument('--hf_repo', type=str, default=None, help='HF Hub repo id (default: env HF_REPO)')
+ 
++    # [aat patch] adaptive per-class epsilon curriculum for the training attacks (Eq. 4.19)
++    parser.add_argument('--aat', action='store_true', help='per-class adaptive eps for the Linf and L1 training attacks')
++    parser.add_argument('--aat_init_frac', type=float, default=0.75)
++    parser.add_argument('--aat_min_frac', type=float, default=0.5)
++    parser.add_argument('--aat_max_frac', type=float, default=1.25)
++    parser.add_argument('--aat_alpha', type=float, default=0.05)
++    parser.add_argument('--aat_tau', type=float, default=0.5)
++
+     args = parser.parse_args()
+     return args
+ 
+@@ -223,6 +231,11 @@ def main():
+     resume_path = run_dir + '/resume.pth'
+     hub_prefix = 'ramp_official/{}/'.format(args.fname)
+     start_epoch, epoch_times = 0, []
++    # [aat patch] per-class eps (n_cls,) for each trained norm (source=Linf, target=L1), start at init_frac*nominal
++    aat_norms = [args.l_norms[cur_norm_source], args.l_norms[cur_norm_target]]
++    aat_nom = {nm: args.l_eps[args.l_norms.index(nm)] for nm in aat_norms}
++    aat_eps = {nm: torch.full((args.n_cls,), args.aat_init_frac * aat_nom[nm], device=x_test_eval.device)
++               for nm in aat_norms} if args.aat else None
+     if args.resume:
+         if not os.path.exists(resume_path):
+             hub_sync.pull(hub_prefix + 'resume.pth', resume_path, args.hf_repo)
+@@ -238,6 +251,8 @@ def main():
+             torch.cuda.set_rng_state_all(ck['rng_cuda'])
+             random.setstate(ck['rng_py'])
+             start_epoch = ck['epoch'] + 1
++            if args.aat:  # [aat patch] KeyError if resuming a non-AAT run with --aat (intended)
++                aat_eps = {nm: ck['aat_eps'][nm].to(x_test_eval.device) for nm in aat_norms}
+             print('[aat patch] resumed after epoch {}'.format(start_epoch))
+ 
+     for epoch in range(start_epoch, args.epochs):  # loop over the dataset multiple times
+@@ -259,6 +274,9 @@ def main():
+                 running_loss_t = 0.0
+                 running_acc_ep_s = 0.
+                 running_acc_ep_t = 0.
++                # [aat patch] per-class robust-accuracy tally of the training attacks (no extra attacks)
++                aat_hit = {nm: torch.zeros(args.n_cls, device=x_test_eval.device) for nm in aat_norms}
++                aat_cnt = torch.zeros(args.n_cls, device=x_test_eval.device)
+                 for i, (x_loader, y_loader) in enumerate(tepoch):
+                     x, y = x_loader.cuda(), y_loader.cuda()
+ 
+@@ -269,11 +287,20 @@ def main():
+                     model.eval()
+ 
+                     # compute training points
+-                    x_tr_s, _, _, loss_best_s, _ = apgd_train(model, x, y, norm=args.l_norms[cur_norm_source],
+-                                eps=args.l_eps[cur_norm_source], n_iter=args.l_iters[cur_norm_source], is_train=True)               
+-
+-                    x_tr_t, _, _, loss_best_t, _ = apgd_train(model, x, y, norm=args.l_norms[cur_norm_target],
+-                                eps=args.l_eps[cur_norm_target], n_iter=args.l_iters[cur_norm_target], is_train=True)
++                    eps_s, eps_t = args.l_eps[cur_norm_source], args.l_eps[cur_norm_target]
++                    if args.aat:  # [aat patch] per-sample eps = eps_c[y], broadcastable (B,1,1,1)
++                        eps_s = aat_eps[aat_norms[0]][y].view(-1, 1, 1, 1)
++                        eps_t = aat_eps[aat_norms[1]][y].view(-1, 1, 1, 1)
++                    x_tr_s, adv_acc_s, _, loss_best_s, _ = apgd_train(model, x, y, norm=args.l_norms[cur_norm_source],
++                                eps=eps_s, n_iter=args.l_iters[cur_norm_source], is_train=True)               
++
++                    x_tr_t, adv_acc_t, _, loss_best_t, _ = apgd_train(model, x, y, norm=args.l_norms[cur_norm_target],
++                                eps=eps_t, n_iter=args.l_iters[cur_norm_target], is_train=True)
++
++                    if args.aat:  # [aat patch]
++                        aat_hit[aat_norms[0]].index_add_(0, y, adv_acc_s.float())
++                        aat_hit[aat_norms[1]].index_add_(0, y, adv_acc_t.float())
++                        aat_cnt.index_add_(0, y, torch.ones_like(y, dtype=torch.float))
+                     
+                     
+                     y_tr = y.long().clone()
+@@ -346,6 +373,17 @@ def main():
+                         
+                     tepoch.set_postfix({'loss': running_loss_t / (i+1), 'acc_s': running_acc_ep_s / (i + 1) / args.batch_size, 'acc_t': running_acc_ep_t / (i + 1) / args.batch_size})
+             
++            aat_line = None
++            if args.aat:
++                # [aat patch] Eq. 4.19 at epoch end: eps_c <- clamp(eps_c + alpha*(A_c - tau)*nominal, min, max)
++                aat_line = '[aat-eps] after epoch {}'.format(epoch + 1)
++                for nm in aat_norms:
++                    A = torch.where(aat_cnt > 0, aat_hit[nm] / aat_cnt.clamp(min=1), torch.full_like(aat_cnt, args.aat_tau))
++                    aat_eps[nm] = (aat_eps[nm] + args.aat_alpha * (A - args.aat_tau) * aat_nom[nm]).clamp(
++                        args.aat_min_frac * aat_nom[nm], args.aat_max_frac * aat_nom[nm])
++                    aat_line += ' | {} A_c {} eps_c/nominal {}'.format(nm, ' '.join('{:.3f}'.format(v) for v in A.tolist()),
++                        ' '.join('{:.4f}'.format(v) for v in (aat_eps[nm] / aat_nom[nm]).tolist()))
++
+             if args.gp:
+                 # model fusion using GP
+                 st = time.time()
+@@ -394,12 +432,15 @@ def main():
+             
+ 
+         logger.log(str_to_log)
++        if aat_line is not None:  # [aat patch] separate line; does not match the '[epoch] N [time]' regex
++            logger.log(aat_line)
+ 
+         # [aat patch] checkpoint + sync every epoch; stop cleanly before the session limit
+         torch.save({'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
+                     'model_nat': model_nat.state_dict(), 'optimizer_nat': optimizer_nat.state_dict(),
+                     'stats': stats, 'epoch': epoch, 'rng_cpu': torch.get_rng_state(),
+-                    'rng_cuda': torch.cuda.get_rng_state_all(), 'rng_py': random.getstate()}, resume_path)
++                    'rng_cuda': torch.cuda.get_rng_state_all(), 'rng_py': random.getstate(),
++                    'aat_eps': aat_eps}, resume_path)
+         hub_sync.push(resume_path, hub_prefix + 'resume.pth', args.hf_repo)
+         hub_sync.push(run_dir + '/log_train.txt', hub_prefix + 'log_train.txt', args.hf_repo)
+         if (epoch + 1) % args.save_freq == 0 or (epoch + 1) == args.epochs:
+diff --git a/autopgd_train.py b/autopgd_train.py
+index 9bd65da..fd008d5 100755
+--- a/autopgd_train.py
++++ b/autopgd_train.py
+@@ -19,6 +19,8 @@ def L1_projection(x2, y2, eps1):
+     and 0 <= x2 + y2 + delta <= 1
+     '''
+ 
++    if torch.is_tensor(eps1):  # [aat patch] per-sample radius, (B,1,1,1) or (B,) -> (B,)
++        eps1 = eps1.reshape(-1)
+     x = x2.clone().float().view(x2.shape[0], -1)
+     y = y2.clone().float().view(y2.shape[0], -1)
+     sigma = y.clone().sign()
+@@ -299,9 +301,15 @@ def apgd_train(model, x, y, norm, eps, n_iter=10, use_rs=False, loss='ce',
+                   sp_curr = L0_norm(x_best - x)
+                   fl_redtopk = (sp_curr / sp_old) < .95
+                   topk = sp_curr / n_fts / 1.5
+-                  step_size[fl_redtopk] = alpha * eps
+-                  step_size[~fl_redtopk] /= adasp_redstep
+-                  step_size.clamp_(alpha * eps / adasp_minstep, alpha * eps)
++                  if torch.is_tensor(eps):  # [aat patch] per-sample eps (B,1,1,1)
++                      a_eps = alpha * eps * torch.ones_like(step_size)
++                      step_size[fl_redtopk] = a_eps[fl_redtopk]
++                      step_size[~fl_redtopk] /= adasp_redstep
++                      step_size.clamp_(a_eps / adasp_minstep, a_eps)
++                  else:
++                      step_size[fl_redtopk] = alpha * eps
++                      step_size[~fl_redtopk] /= adasp_redstep
++                      step_size.clamp_(alpha * eps / adasp_minstep, alpha * eps)
+                   sp_old = sp_curr.clone()
+               
+                   x_adv[fl_redtopk] = x_best[fl_redtopk].clone()

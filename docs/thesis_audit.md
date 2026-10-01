@@ -57,3 +57,17 @@ to reproduce. Page numbers refer to the PDF.
     setting (Table 24) instead; see `docs/ramp_reproduction.md`.
 12. **The evaluation protocol is the first 1,000 test points.** `pretr_Linf` gives 83.7 % there, which
     matches the paper, versus 82.8 % on the full 10k.
+
+## Found while reviewing AAT-on-RAMP (commit 1806a84)
+
+13. **Controller set-point vs. achievable training robustness.** The ε controller (τ = 0.5) reads
+    10-step APGD robust accuracy on training batches. If a class's training robust accuracy stays
+    under 0.5 (likely for cat/deer/bird, which sit at 13–37 % union on test for RAMP), its ε falls
+    by up to 0.025×nominal per epoch and stays at the 0.5×nominal floor. AAT then mostly means
+    "RAMP with smaller training ε for hard classes". A clean-up/robust-down shift against RAMP is
+    then a budget effect, not an effect of adaptivity. **Fix:** check the `[aat-eps]` log lines
+    early in the run. Report mean and per-class ε trajectories next to results. Attribute any
+    difference to *adaptivity* only against a fixed-ε control with matched mean training ε.
+14. **Run-vs-run comparisons must check that the protocol matches.** `scripts/compare_runs.py`
+    must refuse to compare files whose `n`, `backend`, `attacks` or `unseen` grid differ. With two
+    seeds per arm, differences are descriptive only.
