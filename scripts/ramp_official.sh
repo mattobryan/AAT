@@ -11,6 +11,7 @@
 #   ramp_scratch  thesis Table 7.1 / paper Table 3: 80 epochs from scratch, lambda=5, GP (multi-session)
 #   aat_ramp      ramp_scratch + --aat (per-class adaptive training eps; the only difference)
 #   aat_rel       aat_ramp + --aat_relative (budget-neutral: mean_c eps_c == nominal; run name aatrel_l5_s<seed>)
+#   aat_flip      aat_rel + --aat_flip (FRL-style: below-average classes get MORE eps; run name aatflip_l5_s<seed>)
 #   ramp          fine-tuning, lambda=1.5 (repo default = paper Table 24 row); ramp05: lambda=0.5
 #   eat, max      fine-tuning baselines from the same repo
 # Checkpoints sync to the Hugging Face repo in $HF_REPO (token: $HF_TOKEN or the Kaggle secret HF_TOKEN).
@@ -21,7 +22,7 @@ EXT=$ROOT/external/ramp
 COMMIT=be4971f04cf8e70bd8255874a1ed2ab489cae682
 DATA=$ROOT/data
 cmd=$1; shift
-run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; *) echo "${1}_ft_s$2";; esac; }
+run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; aat_flip) echo "aatflip_l5_s$2";; *) echo "${1}_ft_s$2";; esac; }
 
 case $cmd in
 install)
@@ -73,6 +74,8 @@ train)
                   common="--lr-max 0.05 --lr-schedule=static --at_iter 10 --epochs 80 --save_freq 10 --eval_freq 10 --data_dir $DATA" ;;
     aat_rel)      script=RAMP.py;      extra="--kl --max --gp --lbd 5 --aat --aat_relative $resume"   # = aat_ramp + --aat_relative
                   common="--lr-max 0.05 --lr-schedule=static --at_iter 10 --epochs 80 --save_freq 10 --eval_freq 10 --data_dir $DATA" ;;
+    aat_flip)     script=RAMP.py;      extra="--kl --max --gp --lbd 5 --aat --aat_relative --aat_flip $resume"   # = aat_rel + --aat_flip
+                  common="--lr-max 0.05 --lr-schedule=static --at_iter 10 --epochs 80 --save_freq 10 --eval_freq 10 --data_dir $DATA" ;;
     eat)          script=eat_train.py; extra="" ;;
     max)          script=MAX.py;       extra="" ;;
   esac
@@ -93,7 +96,7 @@ eval)
   method=$1; seeds=$2; gpu=${3:-0}
   for s in $seeds; do
     fname=$(run_name $method $s)
-    ep=3; case $method in ramp_scratch|aat_ramp|aat_rel) ep=80;; esac
+    ep=3; case $method in ramp_scratch|aat_ramp|aat_rel|aat_flip) ep=80;; esac
     ck="$EXT/trained_models/$fname/ep_${ep}_0.pth"
     [ -f "$ck" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/ep_${ep}_0.pth" "$ck"
     CUDA_VISIBLE_DEVICES=$gpu python -m aat.evaluate --run "$ROOT/runs_official/$fname" --ckpt "$ck" \

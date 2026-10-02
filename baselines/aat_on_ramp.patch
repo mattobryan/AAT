@@ -1,14 +1,15 @@
 diff --git a/RAMP.py b/RAMP.py
-index 150083c..51fd4a9 100755
+index 150083c..48454c5 100755
 --- a/RAMP.py
 +++ b/RAMP.py
-@@ -81,10 +81,38 @@ def parse_args():
+@@ -81,10 +81,41 @@ def parse_args():
      parser.add_argument('--time_budget_h', type=float, default=0., help='exit cleanly before this many hours (0 = off)')
      parser.add_argument('--hf_repo', type=str, default=None, help='HF Hub repo id (default: env HF_REPO)')
  
 +    # [aat patch] adaptive per-class epsilon curriculum for the training attacks (Eq. 4.19)
 +    parser.add_argument('--aat', action='store_true', help='per-class adaptive eps for the Linf and L1 training attacks')
 +    parser.add_argument('--aat_relative', action='store_true', help='budget-neutral: A_c - mean(A), mean_c eps_c == nominal')
++    parser.add_argument('--aat_flip', action='store_true', help='with --aat_relative: below-average classes get MORE eps (FRL-style)')
 +    parser.add_argument('--aat_init_frac', type=float, default=None, help='default 0.75 (1.0 with --aat_relative)')
 +    parser.add_argument('--aat_min_frac', type=float, default=0.5)
 +    parser.add_argument('--aat_max_frac', type=float, default=None, help='default 1.25 (1.5 with --aat_relative)')
@@ -16,7 +17,9 @@ index 150083c..51fd4a9 100755
 +    parser.add_argument('--aat_tau', type=float, default=0.5)
 +
      args = parser.parse_args()
-+    if args.aat_init_frac is None:  # [aat patch]
++    if args.aat_flip and not (args.aat and args.aat_relative):  # [aat patch]
++        parser.error('--aat_flip requires --aat and --aat_relative')
++    if args.aat_init_frac is None:
 +        args.aat_init_frac = 1.0 if args.aat_relative else 0.75
 +    if args.aat_max_frac is None:
 +        args.aat_max_frac = 1.5 if args.aat_relative else 1.25
@@ -41,7 +44,7 @@ index 150083c..51fd4a9 100755
  def main():
      args = parse_args()
  
-@@ -223,6 +251,11 @@ def main():
+@@ -223,6 +254,11 @@ def main():
      resume_path = run_dir + '/resume.pth'
      hub_prefix = 'ramp_official/{}/'.format(args.fname)
      start_epoch, epoch_times = 0, []
@@ -53,7 +56,7 @@ index 150083c..51fd4a9 100755
      if args.resume:
          if not os.path.exists(resume_path):
              hub_sync.pull(hub_prefix + 'resume.pth', resume_path, args.hf_repo)
-@@ -238,6 +271,8 @@ def main():
+@@ -238,6 +274,8 @@ def main():
              torch.cuda.set_rng_state_all(ck['rng_cuda'])
              random.setstate(ck['rng_py'])
              start_epoch = ck['epoch'] + 1
@@ -62,7 +65,7 @@ index 150083c..51fd4a9 100755
              print('[aat patch] resumed after epoch {}'.format(start_epoch))
  
      for epoch in range(start_epoch, args.epochs):  # loop over the dataset multiple times
-@@ -259,6 +294,9 @@ def main():
+@@ -259,6 +297,9 @@ def main():
                  running_loss_t = 0.0
                  running_acc_ep_s = 0.
                  running_acc_ep_t = 0.
@@ -72,7 +75,7 @@ index 150083c..51fd4a9 100755
                  for i, (x_loader, y_loader) in enumerate(tepoch):
                      x, y = x_loader.cuda(), y_loader.cuda()
  
-@@ -269,11 +307,20 @@ def main():
+@@ -269,11 +310,20 @@ def main():
                      model.eval()
  
                      # compute training points
@@ -98,7 +101,7 @@ index 150083c..51fd4a9 100755
                      
                      
                      y_tr = y.long().clone()
-@@ -346,6 +393,25 @@ def main():
+@@ -346,6 +396,25 @@ def main():
                          
                      tepoch.set_postfix({'loss': running_loss_t / (i+1), 'acc_s': running_acc_ep_s / (i + 1) / args.batch_size, 'acc_t': running_acc_ep_t / (i + 1) / args.batch_size})
              
@@ -111,7 +114,7 @@ index 150083c..51fd4a9 100755
 +                    A_c = aat_hit[nm] / aat_cnt.clamp(min=1)
 +                    ref = A_c[present].mean() if args.aat_relative else args.aat_tau  # A_bar (relative) or tau (absolute)
 +                    A = torch.where(present, A_c, torch.full_like(aat_cnt, float(ref)))
-+                    aat_eps[nm] = (aat_eps[nm] + args.aat_alpha * (A - ref) * aat_nom[nm]).clamp(
++                    aat_eps[nm] = (aat_eps[nm] + args.aat_alpha * (ref - A if args.aat_flip else A - ref) * aat_nom[nm]).clamp(
 +                        args.aat_min_frac * aat_nom[nm], args.aat_max_frac * aat_nom[nm])
 +                    if args.aat_relative:
 +                        aat_eps[nm] = aat_project_mean(aat_eps[nm], aat_nom[nm], args.aat_min_frac * aat_nom[nm],
@@ -124,7 +127,7 @@ index 150083c..51fd4a9 100755
              if args.gp:
                  # model fusion using GP
                  st = time.time()
-@@ -394,12 +460,15 @@ def main():
+@@ -394,12 +463,15 @@ def main():
              
  
          logger.log(str_to_log)
