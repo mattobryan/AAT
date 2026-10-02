@@ -74,3 +74,10 @@ to reproduce. Page numbers refer to the PDF.
     Addressed by `--aat_relative` (method `aat_rel`): ε moves with A_c − mean_c A_c and is projected
     so that mean_c ε_c = nominal (to fp32 precision, ~3e-7 relative) inside [0.5, 1.5]×nominal. The
     mean training budget then matches RAMP, but per-class ε still differs, so results remain descriptive.
+15. **Per-class noise in figures (review of `scripts/plot_progress.py`).** Per-class cells have about
+    100 images (binomial s.e. ≈ 5 pts). The seed-to-seed spread for the same method reaches 11.6 pts
+    for union (RAMP frog) and 9.3 pts for clean (RAMP dog). A fixed "≥ 3 pts" threshold therefore
+    marks noise as an effect. Annotate a per-class difference only when the two 2-seed ranges do not
+    overlap, and call it descriptive. Also, the Hub copy of `ramp_scratch_l5_s0/eval_autoattack.json`
+    differs from the locked `baselines/results` file by about 1 pt per class on plane/car/ship union.
+    The locked file is authoritative. Do not re-pull the baseline from the Hub.
