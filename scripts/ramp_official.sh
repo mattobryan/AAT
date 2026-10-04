@@ -24,7 +24,7 @@ EXT=$ROOT/external/ramp
 COMMIT=be4971f04cf8e70bd8255874a1ed2ab489cae682
 DATA=$ROOT/data
 cmd=$1; shift
-run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; aat_flip) echo "aatflip_l5_s$2";; ramp_wrn) echo "ramp_wrn_ft_s$2";; *) echo "${1}_ft_s$2";; esac; }
+run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; aat_flip) echo "aatflip_l5_s$2";; ramp_wrn) echo "ramp_wrn_ft_s$2${WRN_BS:+_bs$WRN_BS}";; *) echo "${1}_ft_s$2";; esac; }
 
 case $cmd in
 install)
@@ -65,6 +65,9 @@ wrn_data)
   F="$DATA/ti_500K_pseudo_labeled.pickle"; mkdir -p "$DATA"
   [ -f "$F" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" cache/ti_500K_pseudo_labeled.pickle "$F" || true
   [ -f "$F" ] || { echo "missing $F: download it from github.com/yaircarmon/semisup-adv (ti_500K_pseudo_labeled.pickle), place it there, and push it to \$HF_REPO/cache/"; exit 1; }
+  # integrity: the file comes from an external source; its shape must match Carmon et al. (500K images, 500K pseudo labels)
+  python -c "import pickle,sys;d=pickle.load(open(sys.argv[1],'rb'));assert d['data'].shape==(500000,32,32,3) and len(d['extrapolated_targets'])==500000" "$F" || { echo "aux pickle failed the shape check"; exit 1; }
+  echo "sha256 $(sha256sum "$F" | cut -d' ' -f1): record it next to any reported WRN result"
   echo "wrn_data OK"
   ;;
 setup)
