@@ -169,6 +169,24 @@ evalavg2)
   wait $a || ea=$?; wait $b || eb=$?
   exit $(( ea > eb ? ea : eb ))
   ;;
+trainvstest)
+  # H1-vs-H4 diagnostic: per-class robust accuracy on train vs test images of the locked epoch-80 RAMP weights
+  seeds=$1; gpu=${2:-0}
+  for s in $seeds; do
+    fname=$(run_name ramp_scratch $s); ck="$EXT/trained_models/$fname/ep_80_0.pth"
+    [ -f "$ck" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/ep_80_0.pth" "$ck"
+    out="$ROOT/runs_official/$fname/train_vs_test.json"
+    CUDA_VISIBLE_DEVICES=$gpu python "$ROOT/scripts/train_vs_test.py" --ckpt "$ck" --out "$out"
+    python "$ROOT/aat/hub.py" push "${HF_REPO:-none}" "$out" "ramp_official/$fname/train_vs_test.json" || true
+  done
+  ;;
+trainvstest2)
+  ea=0; eb=0
+  bash "$0" trainvstest "$1" 0 & a=$!
+  bash "$0" trainvstest "$2" 1 & b=$!
+  wait $a || ea=$?; wait $b || eb=$?
+  exit $(( ea > eb ? ea : eb ))
+  ;;
 train2|eval2)
   # two seed lists in parallel, one per GPU; fails if either side fails
   method=$1; sub=${cmd%2}
