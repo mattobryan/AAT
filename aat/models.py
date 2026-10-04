@@ -88,6 +88,15 @@ def build_model(name: str = "preactresnet18", dataset: str = "cifar10") -> nn.Mo
         return nn.Sequential(Normalize(mean, std), PreActResNet((2, 2, 2, 2), num_classes))
     if name == "preactresnet18_softplus":
         return nn.Sequential(nn.Identity(), PreActResNet((2, 2, 2, 2), num_classes, activation="softplus1"))
+    if name.startswith("rb:"):
+        # RobustBench architecture by model-zoo id (e.g. rb:Gowal2020Uncovering_28_10_extra). Built WITHOUT
+        # downloading its weights; normalisation is inside the RobustBench model, so inputs stay in [0, 1].
+        from robustbench.model_zoo import model_dicts
+        from robustbench.data import BenchmarkDataset
+        from robustbench.model_zoo.enums import ThreatModel
+        model = model_dicts[BenchmarkDataset(dataset)][ThreatModel.Linf][name[3:]]["model"]()
+        model._rb = True
+        return model
     raise ValueError(f"unknown model {name}")
 
 
@@ -96,6 +105,9 @@ def load_weights(model: nn.Module, path: str, map_location="cpu"):
     (keys without the leading '1.' of our Sequential wrapper)."""
     sd = torch.load(path, map_location=map_location)
     sd = sd.get("model", sd.get("state_dict", sd))
+    if getattr(model, "_rb", False):  # RobustBench model fine-tuned by the official RAMP code: raw state_dict
+        model.load_state_dict({k.replace("module.", "", 1): v for k, v in sd.items()})
+        return model
     if not any(k.startswith("1.") for k in sd):
         sd = {f"1.{k}": v for k, v in sd.items()}
     own = model.state_dict()

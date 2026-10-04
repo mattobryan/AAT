@@ -1,0 +1,5 @@
+# Evaluation settings for the official WRN-28-10 RAMP fine-tune (RobustBench Gowal2020Uncovering_28_10_extra,
+# input normalisation inside the model). Same protocol as official_eval.yaml.
+base: base.yaml
+name: official_wrn
+model: rb:Gowal2020Uncovering_28_10_extra

@@ -12,6 +12,8 @@
 #   aat_ramp      ramp_scratch + --aat (per-class adaptive training eps; the only difference)
 #   aat_rel       aat_ramp + --aat_relative (budget-neutral: mean_c eps_c == nominal; run name aatrel_l5_s<seed>)
 #   aat_flip      aat_rel + --aat_flip (FRL-style: below-average classes get MORE eps; run name aatflip_l5_s<seed>)
+#   ramp_wrn      official WRN-28-10 fine-tune (RAMP_cifar10_aug.py, Gowal2020 extra, lr 0.01, 3 epochs, no GP/AAT);
+#                 needs $DATA/ti_500K_pseudo_labeled.pickle (Carmon et al. 500K; HF cache/ or `wrn_data`); WRN_BS overrides batch size
 #   ramp          fine-tuning, lambda=1.5 (repo default = paper Table 24 row); ramp05: lambda=0.5
 #   eat, max      fine-tuning baselines from the same repo
 # Checkpoints sync to the Hugging Face repo in $HF_REPO (token: $HF_TOKEN or the Kaggle secret HF_TOKEN).
@@ -22,7 +24,7 @@ EXT=$ROOT/external/ramp
 COMMIT=be4971f04cf8e70bd8255874a1ed2ab489cae682
 DATA=$ROOT/data
 cmd=$1; shift
-run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; aat_flip) echo "aatflip_l5_s$2";; *) echo "${1}_ft_s$2";; esac; }
+run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; aat_flip) echo "aatflip_l5_s$2";; ramp_wrn) echo "ramp_wrn_ft_s$2";; *) echo "${1}_ft_s$2";; esac; }
 
 case $cmd in
 install)
@@ -58,6 +60,13 @@ data)
   [ $had_cache = 1 ] || python "$ROOT/aat/hub.py" push "${HF_REPO:-none}" "$TAR" cache/cifar-10-python.tar.gz || true
   echo "data OK"
   ;;
+wrn_data)
+  # Carmon et al. 500K pseudo-labelled aux set required by RAMP_cifar10_aug.py (official WRN-28-10 runs)
+  F="$DATA/ti_500K_pseudo_labeled.pickle"; mkdir -p "$DATA"
+  [ -f "$F" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" cache/ti_500K_pseudo_labeled.pickle "$F" || true
+  [ -f "$F" ] || { echo "missing $F: download it from github.com/yaircarmon/semisup-adv (ti_500K_pseudo_labeled.pickle), place it there, and push it to \$HF_REPO/cache/"; exit 1; }
+  echo "wrn_data OK"
+  ;;
 setup)
   bash "$0" install && bash "$0" data
   ;;
@@ -76,6 +85,9 @@ train)
                   common="--lr-max 0.05 --lr-schedule=static --at_iter 10 --epochs 80 --save_freq 10 --eval_freq 10 --data_dir $DATA" ;;
     aat_flip)     script=RAMP.py;      extra="--kl --max --gp --lbd 5 --aat --aat_relative --aat_flip $resume"   # = aat_rel + --aat_flip
                   common="--lr-max 0.05 --lr-schedule=static --at_iter 10 --epochs 80 --save_freq 10 --eval_freq 10 --data_dir $DATA" ;;
+    ramp_wrn)     script=RAMP_cifar10_aug.py; extra="--kl --max ${WRN_BS:+--batch_size $WRN_BS}"
+                  common="--lr-max 0.01 --finetune_model --lr-schedule=piecewise-ft --model_name RB_Gowal2020Uncovering_28_10_extra --at_iter 10 --epochs 3 --eval_freq 10 --data_dir $DATA"
+                  [ -f "$DATA/ti_500K_pseudo_labeled.pickle" ] || bash "$0" wrn_data ;;
     eat)          script=eat_train.py; extra="" ;;
     max)          script=MAX.py;       extra="" ;;
   esac
@@ -90,6 +102,11 @@ train)
     echo ">> $fname on GPU $gpu"
     CUDA_VISIBLE_DEVICES=$gpu python -u $script $common $extra $fe --seed $s --fname $fname 2>&1 \
       | grep --line-buffered -v "it/s\]" | sed -u "s/^/[$fname] /" | tee "$ROOT/logs_official_$fname.txt"
+    if [ "$method" = ramp_wrn ]; then  # RAMP_cifar10_aug.py has no resume/Hub sync: push the results ourselves
+      for f in ep_3_0.pth log_train.txt log_eval_final.txt; do
+        python "$ROOT/aat/hub.py" push "${HF_REPO:-none}" "trained_models/$fname/$f" "ramp_official/$fname/$f" || true
+      done
+    fi
   done
   ;;
 eval)
@@ -99,8 +116,9 @@ eval)
     ep=3; case $method in ramp_scratch|aat_ramp|aat_rel|aat_flip) ep=80;; esac
     ck="$EXT/trained_models/$fname/ep_${ep}_0.pth"
     [ -f "$ck" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/ep_${ep}_0.pth" "$ck"
+    ecfg=official_eval; [ "$method" = ramp_wrn ] && ecfg=official_eval_wrn
     CUDA_VISIBLE_DEVICES=$gpu python -m aat.evaluate --run "$ROOT/runs_official/$fname" --ckpt "$ck" \
-      --config "$ROOT/configs/official_eval.yaml" --name "${method}_official"
+      --config "$ROOT/configs/$ecfg.yaml" --name "${method}_official"
     python "$ROOT/aat/hub.py" push "${HF_REPO:-none}" "$ROOT/runs_official/$fname/eval_autoattack.json" \
       "ramp_official/$fname/eval_autoattack.json" || true
   done

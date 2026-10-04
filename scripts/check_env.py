@@ -36,7 +36,7 @@ def official_ramp():
     cwd = os.getcwd()
     os.chdir(EXT)
     try:
-        for mod in ["RAMP", "eat_train", "MAX", "eval", "autopgd_train", "hub_sync"]:
+        for mod in ["RAMP", "RAMP_cifar10_aug", "eat_train", "MAX", "eval", "autopgd_train", "hub_sync"]:
             importlib.import_module(mod)
     finally:
         os.chdir(cwd)
