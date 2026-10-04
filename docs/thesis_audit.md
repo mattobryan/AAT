@@ -81,3 +81,8 @@ to reproduce. Page numbers refer to the PDF.
     overlap, and call it descriptive. Also, the Hub copy of `ramp_scratch_l5_s0/eval_autoattack.json`
     differs from the locked `baselines/results` file by about 1 pt per class on plane/car/ship union.
     The locked file is authoritative. Do not re-pull the baseline from the Hub.
+16. **Interpretation limits for the aat_rel / aat_flip results (results-deck review).** The ceiling
+    union ≤ min single-norm applies only to a given model. RAMP's 1.3-pt gap (44.4 vs 45.7 ℓ∞) bounds
+    better *alignment* for RAMP's weights, not what a different training schedule could reach. Two
+    allocation rules at one step size do not show that reallocating ε "cannot" help. Statements that
+    weak classes "lack robust features" or are "data-limited" are hypotheses (H1/H4), not findings.
