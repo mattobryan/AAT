@@ -40,6 +40,10 @@ little headroom; H4 weak classes are capacity-limited; H5 the worst-class number
 2. **H1 proxy, class-sampling fine-tune.** From the locked epoch-80 weights, 10 more epochs, control arm (RAMP only) versus a
    budget-neutral feedback-driven class sampler. Cost about 2.5 session-hours per seed pair plus evaluation. Low expected
    power: a weak-class change under about 5 points cannot be resolved with ~100 images per class.
+   Reviewer notes to carry into any write-up: the averaged model's BN running stats are an approximation (no BN recompute) and
+   ep_60/70 come from the lr 0.05 phase, before the decay; the matched comparison for the sampler is `rampsamp` vs `rampcont` (both use the
+   same with-replacement sampler, control with beta 0), not vs the 80-epoch RAMP. Both arms continue at lr 0.005 with momentum restarted.
+   Code: `trainpair`/`evalpair` and `avg2` in `scripts/ramp_official.sh`; notebooks `ramp_avg_kaggle.ipynb`, `ramp_samp_kaggle.ipynb`.
 3. **WRN-28-10 RAMP fine-tune (deferred).** Code is in (`ramp_wrn`, `notebooks/ramp_wrn_kaggle.ipynb`). The official script needs the
    500K aux pickle (no verified source) and doubles the images per epoch. Estimated 14+ GPU-hours per seed. A cheaper variant would
    fine-tune the same WRN on CIFAR-10 alone with plain `RAMP.py`. Decide only with a quota number in hand.

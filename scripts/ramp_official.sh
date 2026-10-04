@@ -14,7 +14,7 @@
 #   aat_flip      aat_rel + --aat_flip (FRL-style: below-average classes get MORE eps; run name aatflip_l5_s<seed>)
 #   ramp_wrn      official WRN-28-10 fine-tune (RAMP_cifar10_aug.py, Gowal2020 extra, lr 0.01, 3 epochs, no GP/AAT);
 #                 needs $DATA/ti_500K_pseudo_labeled.pickle (Carmon et al. 500K; HF cache/ or `wrn_data`); WRN_BS overrides batch size
-#   ramp_cont     control: 10 more epochs of RAMP (ramp_scratch flags) from the locked ep_80 weights; name rampcont_s<seed>
+#   ramp_cont     control: 10 more epochs of RAMP (ramp_scratch flags) from the locked ep_80 weights, same sampler with beta 0; name rampcont_s<seed>
 #   ramp_samp     ramp_cont + --aat_sample (budget-neutral class-sampling feedback); name rampsamp_s<seed>
 #                 (lr stays 0.005 = the lr the weights ended at; momentum restarts; `trainpair`/`evalpair` run both arms)
 #   ramp          fine-tuning, lambda=1.5 (repo default = paper Table 24 row); ramp05: lambda=0.5
@@ -94,7 +94,7 @@ train)
     ramp_wrn)     script=RAMP_cifar10_aug.py; extra="--kl --max ${WRN_BS:+--batch_size $WRN_BS}"
                   common="--lr-max 0.01 --finetune_model --lr-schedule=piecewise-ft --model_name RB_Gowal2020Uncovering_28_10_extra --at_iter 10 --epochs 3 --eval_freq 10 --data_dir $DATA"
                   [ -f "$DATA/ti_500K_pseudo_labeled.pickle" ] || bash "$0" wrn_data ;;
-    ramp_cont)    script=RAMP.py;      extra="--kl --max --gp --lbd 5 $resume"
+    ramp_cont)    script=RAMP.py;      extra="--kl --max --gp --lbd 5 --aat_sample --aat_samp_beta 0 $resume"   # beta 0: w_c stays 1, same sampler as ramp_samp
                   common="--lr-max 0.005 --lr-schedule=static --at_iter 10 --epochs 10 --save_freq 10 --eval_freq 10 --data_dir $DATA --finetune_model" ;;
     ramp_samp)    script=RAMP.py;      extra="--kl --max --gp --lbd 5 --aat_sample $resume"
                   common="--lr-max 0.005 --lr-schedule=static --at_iter 10 --epochs 10 --save_freq 10 --eval_freq 10 --data_dir $DATA --finetune_model" ;;
@@ -112,6 +112,7 @@ train)
     case $method in ramp_cont|ramp_samp)  # start from the locked epoch-80 weights (raw state_dict) of the same seed
       init="trained_models/ramp_scratch_l5_s$s/ep_80_0.pth"
       [ -f "$init" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/ramp_scratch_l5_s$s/ep_80_0.pth" "$init"
+      [ -f "$init" ] || { echo "missing $init (would silently train from random init)"; exit 1; }
       c2="$common --model_name $init" ;;
     esac
     fe="--final_eval --n_ex_final 1000"   # official eval on the same 1000 points, to cross-check ours

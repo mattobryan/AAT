@@ -86,3 +86,7 @@ to reproduce. Page numbers refer to the PDF.
     better *alignment* for RAMP's weights, not what a different training schedule could reach. Two
     allocation rules at one step size do not show that reallocating ε "cannot" help. Statements that
     weak classes "lack robust features" or are "data-limited" are hypotheses (H1/H4), not findings.
+17. **Class-sampling experiment (4beab80): the control must use the same sampler.** `ramp_samp` draws with
+    replacement (WeightedRandomSampler), so only about 63 % of images are unique per epoch. `ramp_cont`
+    shuffles without replacement. Unless both arms use the same sampler (control = `--aat_sample
+    --aat_samp_beta 0`), the class weighting is confounded with the change of sampling scheme.

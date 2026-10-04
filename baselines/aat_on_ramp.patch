@@ -91,7 +91,7 @@ index 150083c..21b5890 100755
              print('[aat patch] resumed after epoch {}'.format(start_epoch))
  
      for epoch in range(start_epoch, args.epochs):  # loop over the dataset multiple times
-+        if args.aat_sample and not torch.all(aat_w == 1):  # [aat patch] weighted draw, same #images per epoch
++        if args.aat_sample:  # [aat patch] weighted draw (with replacement; beta=0 keeps w=1), same #images per epoch
 +            train_loader = aat_weighted_loader(train_loader, aat_w, args.n_cls)
          model_old = copy.deepcopy(model)
          startt = time.time()
