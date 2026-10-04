@@ -14,7 +14,19 @@
      args = parser.parse_args()
      if args.aat_flip and not (args.aat and args.aat_relative):  # [aat patch]
          parser.error('--aat_flip requires --aat and --aat_relative')
-@@ -278,7 +285,18 @@
+@@ -270,6 +277,11 @@
+             model_nat.load_state_dict(ck['model_nat'])
+             optimizer_nat.load_state_dict(ck['optimizer_nat'])
+             stats = ck['stats']
++            for _grp in stats.values():  # [cls patch] per-epoch arrays were sized for the original --epochs; extend them
++                if isinstance(_grp, dict):
++                    for _k, _v in _grp.items():
++                        if torch.is_tensor(_v) and _v.dim() == 1 and _v.numel() < args.epochs:
++                            _grp[_k] = torch.cat([_v, torch.zeros(args.epochs - _v.numel(), dtype=_v.dtype)])
+             torch.set_rng_state(ck['rng_cpu'])
+             torch.cuda.set_rng_state_all(ck['rng_cuda'])
+             random.setstate(ck['rng_py'])
+@@ -278,7 +290,18 @@
                  aat_eps = {nm: ck['aat_eps'][nm].to(x_test_eval.device) for nm in aat_norms}
              print('[aat patch] resumed after epoch {}'.format(start_epoch))
  
@@ -33,7 +45,7 @@
          model_old = copy.deepcopy(model)
          startt = time.time()
          if True:
-@@ -320,7 +338,7 @@
+@@ -320,7 +343,7 @@
                      x_tr_t, adv_acc_t, _, loss_best_t, _ = apgd_train(model, x, y, norm=args.l_norms[cur_norm_target],
                                  eps=eps_t, n_iter=args.l_iters[cur_norm_target], is_train=True)
  
@@ -42,7 +54,7 @@
                          aat_hit[aat_norms[0]].index_add_(0, y, adv_acc_s.float())
                          aat_hit[aat_norms[1]].index_add_(0, y, adv_acc_t.float())
                          aat_cnt.index_add_(0, y, torch.ones_like(y, dtype=torch.float))
-@@ -396,6 +414,17 @@
+@@ -396,6 +419,17 @@
                          
                      tepoch.set_postfix({'loss': running_loss_t / (i+1), 'acc_s': running_acc_ep_s / (i + 1) / args.batch_size, 'acc_t': running_acc_ep_t / (i + 1) / args.batch_size})
              
@@ -60,7 +72,7 @@
              aat_line = None
              if args.aat:
                  # [aat patch] Eq. 4.19 at epoch end: eps_c <- clamp(eps_c + alpha*(A_c - tau)*nominal, min, max)
-@@ -465,13 +494,15 @@
+@@ -465,13 +499,15 @@
          logger.log(str_to_log)
          if aat_line is not None:  # [aat patch] separate line; does not match the '[epoch] N [time]' regex
              logger.log(aat_line)
