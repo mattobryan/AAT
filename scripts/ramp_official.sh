@@ -126,6 +126,32 @@ eval)
       "ramp_official/$fname/eval_autoattack.json" || true
   done
   ;;
+evalavg)
+  # H5: uniform weight average of the saved epochs $AVG_EPS (default "60 70 80") of ramp_scratch, same AutoAttack protocol
+  seeds=$1; gpu=${2:-0}
+  for s in $seeds; do
+    fname=$(run_name ramp_scratch $s); cks=""
+    for e in ${AVG_EPS:-60 70 80}; do
+      ck="$EXT/trained_models/$fname/ep_${e}_0.pth"
+      [ -f "$ck" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/ep_${e}_0.pth" "$ck"
+      cks="$cks $ck"
+    done
+    tag=ramp_scratch_avg_l5_s$s
+    mkdir -p "$ROOT/runs_official/$tag"
+    python "$ROOT/scripts/avg_ckpt.py" "$ROOT/runs_official/$tag/avg.pth" $cks
+    CUDA_VISIBLE_DEVICES=$gpu python -m aat.evaluate --run "$ROOT/runs_official/$tag" --ckpt "$ROOT/runs_official/$tag/avg.pth" \
+      --config "$ROOT/configs/official_eval.yaml" --name "ramp_scratch_avg"
+    python "$ROOT/aat/hub.py" push "${HF_REPO:-none}" "$ROOT/runs_official/$tag/eval_autoattack.json" \
+      "ramp_official/$tag/eval_autoattack.json" || true
+  done
+  ;;
+evalavg2)
+  ea=0; eb=0
+  bash "$0" evalavg "$1" 0 & a=$!
+  bash "$0" evalavg "$2" 1 & b=$!
+  wait $a || ea=$?; wait $b || eb=$?
+  exit $(( ea > eb ? ea : eb ))
+  ;;
 train2|eval2)
   # two seed lists in parallel, one per GPU; fails if either side fails
   method=$1; sub=${cmd%2}
