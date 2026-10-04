@@ -24,7 +24,7 @@ EXT=$ROOT/external/ramp
 COMMIT=be4971f04cf8e70bd8255874a1ed2ab489cae682
 DATA=$ROOT/data
 cmd=$1; shift
-run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; aat_flip) echo "aatflip_l5_s$2";; ramp_wrn) echo "ramp_wrn_ft_s$2${WRN_BS:+_bs$WRN_BS}";; *) echo "${1}_ft_s$2";; esac; }
+run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; aat_flip) echo "aatflip_l5_s$2";; cls_ctrl) echo "clsctrl_l5_s$2";; cls_fb) echo "clsfb_l5_s$2";; ramp_wrn) echo "ramp_wrn_ft_s$2${WRN_BS:+_bs$WRN_BS}";; *) echo "${1}_ft_s$2";; esac; }
 
 case $cmd in
 install)
@@ -41,6 +41,8 @@ install)
   git -C "$EXT" apply --check "$ROOT/baselines/ramp_resume_hub.patch" 2>/dev/null && git -C "$EXT" apply "$ROOT/baselines/ramp_resume_hub.patch"
   # AAT = RAMP + per-class adaptive eps in the training attacks only (baselines/aat_on_ramp.patch, applied on top)
   git -C "$EXT" apply --check "$ROOT/baselines/aat_on_ramp.patch" 2>/dev/null && git -C "$EXT" apply "$ROOT/baselines/aat_on_ramp.patch"
+  # class-sampling fine-tune (H1 proxy; --cls_sample uniform|feedback) on top of both patches: baselines/class_sampler.patch
+  git -C "$EXT" apply --check "$ROOT/baselines/class_sampler.patch" 2>/dev/null && git -C "$EXT" apply "$ROOT/baselines/class_sampler.patch"
   cp "$ROOT/aat/hub.py" "$EXT/hub_sync.py"
   # dependencies first, then a full import check (also imports the official RAMP.py) before anything else
   pip install -q -r "$ROOT/requirements-kaggle.txt" || {
@@ -88,6 +90,9 @@ train)
                   common="--lr-max 0.05 --lr-schedule=static --at_iter 10 --epochs 80 --save_freq 10 --eval_freq 10 --data_dir $DATA" ;;
     aat_flip)     script=RAMP.py;      extra="--kl --max --gp --lbd 5 --aat --aat_relative --aat_flip $resume"   # = aat_rel + --aat_flip
                   common="--lr-max 0.05 --lr-schedule=static --at_iter 10 --epochs 80 --save_freq 10 --eval_freq 10 --data_dir $DATA" ;;
+    cls_ctrl|cls_fb)  # H1 proxy: epochs 81-90 continued from the locked epoch-80 resume.pth; arms differ only in --cls_sample
+                  script=RAMP.py; extra="--kl --max --gp --lbd 5 --cls_sample $([ $method = cls_fb ] && echo feedback || echo uniform) $resume"
+                  common="--lr-max 0.05 --lr-schedule=static --at_iter 10 --epochs 90 --save_freq 10 --eval_freq 10 --data_dir $DATA" ;;
     ramp_wrn)     script=RAMP_cifar10_aug.py; extra="--kl --max ${WRN_BS:+--batch_size $WRN_BS}"
                   common="--lr-max 0.01 --finetune_model --lr-schedule=piecewise-ft --model_name RB_Gowal2020Uncovering_28_10_extra --at_iter 10 --epochs 3 --eval_freq 10 --data_dir $DATA"
                   [ -f "$DATA/ti_500K_pseudo_labeled.pickle" ] || bash "$0" wrn_data ;;
@@ -98,10 +103,22 @@ train)
   for s in $seeds; do
     fname=$(run_name $method $s)
     # finished = official final-eval log exists locally or on the Hub
-    [ -f "trained_models/$fname/log_eval_final.txt" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" \
-        "ramp_official/$fname/log_eval_final.txt" "trained_models/$fname/log_eval_final.txt" >/dev/null 2>&1 || true
-    [ -f "trained_models/$fname/log_eval_final.txt" ] && { echo "done already: $fname"; continue; }
+    done_f=log_eval_final.txt; case $method in cls_ctrl|cls_fb) done_f=ep_90_0.pth;; esac  # cls arms: our own AutoAttack eval only
+    [ -f "trained_models/$fname/$done_f" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" \
+        "ramp_official/$fname/$done_f" "trained_models/$fname/$done_f" >/dev/null 2>&1 || true
+    [ -f "trained_models/$fname/$done_f" ] && { echo "done already: $fname"; continue; }
+    if [ "$method" = cls_ctrl ] || [ "$method" = cls_fb ]; then
+      # seed the run from the locked epoch-80 state unless this run already has its own resume point (own HF copy wins)
+      rd="trained_models/$fname"; mkdir -p "$rd"
+      if [ ! -f "$rd/resume.pth" ]; then
+        python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/resume.pth" "$rd/resume.pth" || \
+          python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/ramp_scratch_l5_s$s/resume.pth" "$rd/resume.pth"
+        python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/log_train.txt" "$rd/log_train.txt" >/dev/null 2>&1 || true
+      fi
+      python -c "import torch,sys;e=torch.load(sys.argv[1],map_location='cpu')['epoch'];assert 79<=e<89,e;print('seed state epoch',e+1)" "$rd/resume.pth"
+    fi
     fe="--final_eval --n_ex_final 1000"   # official eval on the same 1000 points, to cross-check ours
+    case $method in cls_ctrl|cls_fb) fe="";; esac
     echo ">> $fname on GPU $gpu"
     CUDA_VISIBLE_DEVICES=$gpu python -u $script $common $extra $fe --seed $s --fname $fname 2>&1 \
       | grep --line-buffered -v "it/s\]" | sed -u "s/^/[$fname] /" | tee "$ROOT/logs_official_$fname.txt"
@@ -116,7 +133,7 @@ eval)
   method=$1; seeds=$2; gpu=${3:-0}
   for s in $seeds; do
     fname=$(run_name $method $s)
-    ep=3; case $method in ramp_scratch|aat_ramp|aat_rel|aat_flip) ep=80;; esac
+    ep=3; case $method in ramp_scratch|aat_ramp|aat_rel|aat_flip) ep=80;; cls_ctrl|cls_fb) ep=90;; esac
     ck="$EXT/trained_models/$fname/ep_${ep}_0.pth"
     [ -f "$ck" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/ep_${ep}_0.pth" "$ck"
     ecfg=official_eval; [ "$method" = ramp_wrn ] && ecfg=official_eval_wrn

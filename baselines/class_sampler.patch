@@ -1,0 +1,79 @@
+--- a/RAMP.py
++++ b/RAMP.py
+@@ -91,6 +91,13 @@
+     parser.add_argument('--aat_alpha', type=float, default=0.05)
+     parser.add_argument('--aat_tau', type=float, default=0.5)
+ 
++    # [cls patch] class-sampling fine-tune (H1 proxy): epoch = len(dataset) draws with replacement, class probs from cls_w
++    parser.add_argument('--cls_sample', type=str, default='off', choices=['off', 'uniform', 'feedback'],
++                        help='uniform = control arm (same sampler, w=1); feedback = weak classes drawn more, mean(w)=1')
++    parser.add_argument('--cls_beta', type=float, default=1.0)
++    parser.add_argument('--cls_min', type=float, default=0.5)
++    parser.add_argument('--cls_max', type=float, default=1.5)
++
+     args = parser.parse_args()
+     if args.aat_flip and not (args.aat and args.aat_relative):  # [aat patch]
+         parser.error('--aat_flip requires --aat and --aat_relative')
+@@ -278,7 +285,18 @@
+                 aat_eps = {nm: ck['aat_eps'][nm].to(x_test_eval.device) for nm in aat_norms}
+             print('[aat patch] resumed after epoch {}'.format(start_epoch))
+ 
++    # [cls patch] per-class sampling weights (mean 1); restored on resume
++    cls_w = torch.ones(args.n_cls)
++    if args.resume and args.cls_sample != 'off' and os.path.exists(resume_path) and ck.get('cls_w') is not None:
++        cls_w = ck['cls_w'].cpu()
++    if args.cls_sample != 'off':
++        cls_targets = torch.as_tensor(train_loader.dataset.targets)
++
+     for epoch in range(start_epoch, args.epochs):  # loop over the dataset multiple times
++        if args.cls_sample != 'off':  # [cls patch] same sampler mechanics in both arms; only cls_w differs
++            sampler = torch.utils.data.WeightedRandomSampler(cls_w[cls_targets].double(), num_samples=len(cls_targets), replacement=True)
++            train_loader = torch.utils.data.DataLoader(train_loader.dataset, batch_size=args.batch_size, sampler=sampler,
++                                                       pin_memory=True, num_workers=2)
+         model_old = copy.deepcopy(model)
+         startt = time.time()
+         if True:
+@@ -320,7 +338,7 @@
+                     x_tr_t, adv_acc_t, _, loss_best_t, _ = apgd_train(model, x, y, norm=args.l_norms[cur_norm_target],
+                                 eps=eps_t, n_iter=args.l_iters[cur_norm_target], is_train=True)
+ 
+-                    if args.aat:  # [aat patch]
++                    if args.aat or args.cls_sample != 'off':  # [aat patch]
+                         aat_hit[aat_norms[0]].index_add_(0, y, adv_acc_s.float())
+                         aat_hit[aat_norms[1]].index_add_(0, y, adv_acc_t.float())
+                         aat_cnt.index_add_(0, y, torch.ones_like(y, dtype=torch.float))
+@@ -396,6 +414,17 @@
+                         
+                     tepoch.set_postfix({'loss': running_loss_t / (i+1), 'acc_s': running_acc_ep_s / (i + 1) / args.batch_size, 'acc_t': running_acc_ep_t / (i + 1) / args.batch_size})
+             
++            cls_line = None
++            if args.cls_sample == 'feedback':  # [cls patch] w_c = clip(1 + beta*(Abar - A_c)/Abar), then mean-1 renormalise inside [min,max]
++                A = sum(aat_hit[nm] for nm in aat_norms) / (len(aat_norms) * aat_cnt.clamp(min=1))
++                A = A.cpu(); Abar = A.mean()
++                w = (1 + args.cls_beta * (Abar - A) / Abar).clamp(args.cls_min, args.cls_max)
++                cls_w = aat_project_mean(w, 1.0, args.cls_min, args.cls_max)
++                cls_line = '[cls-w] after epoch {} | A_c {} | w_c {}'.format(epoch + 1,
++                    ' '.join('{:.3f}'.format(v) for v in A.tolist()), ' '.join('{:.3f}'.format(v) for v in cls_w.tolist()))
++            elif args.cls_sample == 'uniform':
++                A = sum(aat_hit[nm] for nm in aat_norms) / (len(aat_norms) * aat_cnt.clamp(min=1))
++                cls_line = '[cls-w] after epoch {} | A_c {} | w_c uniform'.format(epoch + 1, ' '.join('{:.3f}'.format(v) for v in A.tolist()))
+             aat_line = None
+             if args.aat:
+                 # [aat patch] Eq. 4.19 at epoch end: eps_c <- clamp(eps_c + alpha*(A_c - tau)*nominal, min, max)
+@@ -465,13 +494,15 @@
+         logger.log(str_to_log)
+         if aat_line is not None:  # [aat patch] separate line; does not match the '[epoch] N [time]' regex
+             logger.log(aat_line)
++        if cls_line is not None:  # [cls patch]
++            logger.log(cls_line)
+ 
+         # [aat patch] checkpoint + sync every epoch; stop cleanly before the session limit
+         torch.save({'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
+                     'model_nat': model_nat.state_dict(), 'optimizer_nat': optimizer_nat.state_dict(),
+                     'stats': stats, 'epoch': epoch, 'rng_cpu': torch.get_rng_state(),
+                     'rng_cuda': torch.cuda.get_rng_state_all(), 'rng_py': random.getstate(),
+-                    'aat_eps': aat_eps}, resume_path)
++                    'aat_eps': aat_eps, 'cls_w': cls_w}, resume_path)
+         hub_sync.push(resume_path, hub_prefix + 'resume.pth', args.hf_repo)
+         hub_sync.push(run_dir + '/log_train.txt', hub_prefix + 'log_train.txt', args.hf_repo)
+         if (epoch + 1) % args.save_freq == 0 or (epoch + 1) == args.epochs:
