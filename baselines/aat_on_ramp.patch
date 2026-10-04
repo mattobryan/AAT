@@ -1,8 +1,16 @@
 diff --git a/RAMP.py b/RAMP.py
-index 150083c..48454c5 100755
+index 150083c..21b5890 100755
 --- a/RAMP.py
 +++ b/RAMP.py
-@@ -81,10 +81,41 @@ def parse_args():
+@@ -13,6 +13,7 @@ import argparse
+ import time
+ #from datetime import datetime
+ import random
++import numpy as np
+ import math
+ import glob
+ 
+@@ -81,10 +82,56 @@ def parse_args():
      parser.add_argument('--time_budget_h', type=float, default=0., help='exit cleanly before this many hours (0 = off)')
      parser.add_argument('--hf_repo', type=str, default=None, help='HF Hub repo id (default: env HF_REPO)')
  
@@ -10,6 +18,10 @@ index 150083c..48454c5 100755
 +    parser.add_argument('--aat', action='store_true', help='per-class adaptive eps for the Linf and L1 training attacks')
 +    parser.add_argument('--aat_relative', action='store_true', help='budget-neutral: A_c - mean(A), mean_c eps_c == nominal')
 +    parser.add_argument('--aat_flip', action='store_true', help='with --aat_relative: below-average classes get MORE eps (FRL-style)')
++    parser.add_argument('--aat_sample', action='store_true', help='budget-neutral class-sampling feedback (A_bar - A_c), same images/epoch')
++    parser.add_argument('--aat_samp_beta', type=float, default=0.5)
++    parser.add_argument('--aat_samp_min', type=float, default=0.5)
++    parser.add_argument('--aat_samp_max', type=float, default=2.0)
 +    parser.add_argument('--aat_init_frac', type=float, default=None, help='default 0.75 (1.0 with --aat_relative)')
 +    parser.add_argument('--aat_min_frac', type=float, default=0.5)
 +    parser.add_argument('--aat_max_frac', type=float, default=None, help='default 1.25 (1.5 with --aat_relative)')
@@ -26,6 +38,17 @@ index 150083c..48454c5 100755
      return args
  
  
++def aat_weighted_loader(loader, w, n_cls):
++    # [aat patch] same dataset/batch size/#images per epoch as `loader`, classes drawn with probability prop. to w_c
++    ds = loader.dataset
++    t = np.array(ds.dataset.targets)[ds.indices] if hasattr(ds, 'indices') else np.array(ds.targets)
++    cnt = np.bincount(t, minlength=n_cls).astype(np.float64)
++    ws = torch.as_tensor(w.cpu().numpy()[t] / cnt[t], dtype=torch.double)
++    sampler = torch.utils.data.WeightedRandomSampler(ws, num_samples=len(ds), replacement=True)
++    return torch.utils.data.DataLoader(ds, batch_size=loader.batch_size, sampler=sampler, num_workers=loader.num_workers,
++                                       pin_memory=True)
++
++
 +def aat_project_mean(eps, nominal, lo, hi):
 +    # [aat patch] make mean_c(eps_c) == nominal inside [lo, hi]: rescale+clamp, then exact additive shift on unclamped classes
 +    for _ in range(10):
@@ -44,7 +67,7 @@ index 150083c..48454c5 100755
  def main():
      args = parse_args()
  
-@@ -223,6 +254,11 @@ def main():
+@@ -223,6 +270,12 @@ def main():
      resume_path = run_dir + '/resume.pth'
      hub_prefix = 'ramp_official/{}/'.format(args.fname)
      start_epoch, epoch_times = 0, []
@@ -53,19 +76,27 @@ index 150083c..48454c5 100755
 +    aat_nom = {nm: args.l_eps[args.l_norms.index(nm)] for nm in aat_norms}
 +    aat_eps = {nm: torch.full((args.n_cls,), args.aat_init_frac * aat_nom[nm], device=x_test_eval.device)
 +               for nm in aat_norms} if args.aat else None
++    aat_w = torch.ones(args.n_cls, device=x_test_eval.device) if args.aat_sample else None  # class-sampling weights
      if args.resume:
          if not os.path.exists(resume_path):
              hub_sync.pull(hub_prefix + 'resume.pth', resume_path, args.hf_repo)
-@@ -238,6 +274,8 @@ def main():
+@@ -238,9 +291,15 @@ def main():
              torch.cuda.set_rng_state_all(ck['rng_cuda'])
              random.setstate(ck['rng_py'])
              start_epoch = ck['epoch'] + 1
++            if args.aat_sample:
++                aat_w = ck['aat_w'].to(x_test_eval.device)
 +            if args.aat:  # [aat patch] KeyError if resuming a non-AAT run with --aat (intended)
 +                aat_eps = {nm: ck['aat_eps'][nm].to(x_test_eval.device) for nm in aat_norms}
              print('[aat patch] resumed after epoch {}'.format(start_epoch))
  
      for epoch in range(start_epoch, args.epochs):  # loop over the dataset multiple times
-@@ -259,6 +297,9 @@ def main():
++        if args.aat_sample and not torch.all(aat_w == 1):  # [aat patch] weighted draw, same #images per epoch
++            train_loader = aat_weighted_loader(train_loader, aat_w, args.n_cls)
+         model_old = copy.deepcopy(model)
+         startt = time.time()
+         if True:
+@@ -259,6 +318,9 @@ def main():
                  running_loss_t = 0.0
                  running_acc_ep_s = 0.
                  running_acc_ep_t = 0.
@@ -75,7 +106,7 @@ index 150083c..48454c5 100755
                  for i, (x_loader, y_loader) in enumerate(tepoch):
                      x, y = x_loader.cuda(), y_loader.cuda()
  
-@@ -269,11 +310,20 @@ def main():
+@@ -269,11 +331,20 @@ def main():
                      model.eval()
  
                      # compute training points
@@ -94,14 +125,14 @@ index 150083c..48454c5 100755
 +                    x_tr_t, adv_acc_t, _, loss_best_t, _ = apgd_train(model, x, y, norm=args.l_norms[cur_norm_target],
 +                                eps=eps_t, n_iter=args.l_iters[cur_norm_target], is_train=True)
 +
-+                    if args.aat:  # [aat patch]
++                    if args.aat or args.aat_sample:  # [aat patch]
 +                        aat_hit[aat_norms[0]].index_add_(0, y, adv_acc_s.float())
 +                        aat_hit[aat_norms[1]].index_add_(0, y, adv_acc_t.float())
 +                        aat_cnt.index_add_(0, y, torch.ones_like(y, dtype=torch.float))
                      
                      
                      y_tr = y.long().clone()
-@@ -346,6 +396,25 @@ def main():
+@@ -346,6 +417,36 @@ def main():
                          
                      tepoch.set_postfix({'loss': running_loss_t / (i+1), 'acc_s': running_acc_ep_s / (i + 1) / args.batch_size, 'acc_t': running_acc_ep_t / (i + 1) / args.batch_size})
              
@@ -124,13 +155,26 @@ index 150083c..48454c5 100755
 +                    if args.aat_relative:
 +                        aat_line += ' mean_eps/nominal {:.6f}'.format((aat_eps[nm].mean() / aat_nom[nm]).item())
 +
++            samp_line = None
++            if args.aat_sample:  # [aat patch] w_c <- clamp(w_c*exp(beta*(A_bar-A_c)), min, max), rescaled to mean 1
++                present = aat_cnt > 0
++                A_c = (aat_hit[aat_norms[0]] + aat_hit[aat_norms[1]]) / (2 * aat_cnt.clamp(min=1))
++                A_bar = A_c[present].mean()
++                A_c = torch.where(present, A_c, A_bar)
++                aat_w = (aat_w * torch.exp(args.aat_samp_beta * (A_bar - A_c))).clamp(args.aat_samp_min, args.aat_samp_max)
++                aat_w = aat_w / aat_w.mean()
++                samp_line = '[aat-samp] after epoch {} | w_c {} | A_c {}'.format(epoch + 1,
++                    ' '.join('{:.4f}'.format(v) for v in aat_w.tolist()), ' '.join('{:.3f}'.format(v) for v in A_c.tolist()))
++
              if args.gp:
                  # model fusion using GP
                  st = time.time()
-@@ -394,12 +463,15 @@ def main():
+@@ -394,12 +495,17 @@ def main():
              
  
          logger.log(str_to_log)
++        if samp_line is not None:  # [aat patch]
++            logger.log(samp_line)
 +        if aat_line is not None:  # [aat patch] separate line; does not match the '[epoch] N [time]' regex
 +            logger.log(aat_line)
  
@@ -140,7 +184,7 @@ index 150083c..48454c5 100755
                      'stats': stats, 'epoch': epoch, 'rng_cpu': torch.get_rng_state(),
 -                    'rng_cuda': torch.cuda.get_rng_state_all(), 'rng_py': random.getstate()}, resume_path)
 +                    'rng_cuda': torch.cuda.get_rng_state_all(), 'rng_py': random.getstate(),
-+                    'aat_eps': aat_eps}, resume_path)
++                    'aat_eps': aat_eps, 'aat_w': aat_w}, resume_path)
          hub_sync.push(resume_path, hub_prefix + 'resume.pth', args.hf_repo)
          hub_sync.push(run_dir + '/log_train.txt', hub_prefix + 'log_train.txt', args.hf_repo)
          if (epoch + 1) % args.save_freq == 0 or (epoch + 1) == args.epochs:

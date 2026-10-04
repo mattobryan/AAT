@@ -14,6 +14,9 @@
 #   aat_flip      aat_rel + --aat_flip (FRL-style: below-average classes get MORE eps; run name aatflip_l5_s<seed>)
 #   ramp_wrn      official WRN-28-10 fine-tune (RAMP_cifar10_aug.py, Gowal2020 extra, lr 0.01, 3 epochs, no GP/AAT);
 #                 needs $DATA/ti_500K_pseudo_labeled.pickle (Carmon et al. 500K; HF cache/ or `wrn_data`); WRN_BS overrides batch size
+#   ramp_cont     control: 10 more epochs of RAMP (ramp_scratch flags) from the locked ep_80 weights; name rampcont_s<seed>
+#   ramp_samp     ramp_cont + --aat_sample (budget-neutral class-sampling feedback); name rampsamp_s<seed>
+#                 (lr stays 0.005 = the lr the weights ended at; momentum restarts; `trainpair`/`evalpair` run both arms)
 #   ramp          fine-tuning, lambda=1.5 (repo default = paper Table 24 row); ramp05: lambda=0.5
 #   eat, max      fine-tuning baselines from the same repo
 # Checkpoints sync to the Hugging Face repo in $HF_REPO (token: $HF_TOKEN or the Kaggle secret HF_TOKEN).
@@ -24,7 +27,7 @@ EXT=$ROOT/external/ramp
 COMMIT=be4971f04cf8e70bd8255874a1ed2ab489cae682
 DATA=$ROOT/data
 cmd=$1; shift
-run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; aat_flip) echo "aatflip_l5_s$2";; ramp_wrn) echo "ramp_wrn_ft_s$2${WRN_BS:+_bs$WRN_BS}";; *) echo "${1}_ft_s$2";; esac; }
+run_name() { case $1 in ramp_scratch) echo "ramp_scratch_l5_s$2";; aat_ramp) echo "aat_ramp_l5_s$2";; aat_rel) echo "aatrel_l5_s$2";; aat_flip) echo "aatflip_l5_s$2";; ramp_wrn) echo "ramp_wrn_ft_s$2${WRN_BS:+_bs$WRN_BS}";; ramp_cont) echo "rampcont_s$2";; ramp_samp) echo "rampsamp_s$2";; *) echo "${1}_ft_s$2";; esac; }
 
 case $cmd in
 install)
@@ -91,6 +94,10 @@ train)
     ramp_wrn)     script=RAMP_cifar10_aug.py; extra="--kl --max ${WRN_BS:+--batch_size $WRN_BS}"
                   common="--lr-max 0.01 --finetune_model --lr-schedule=piecewise-ft --model_name RB_Gowal2020Uncovering_28_10_extra --at_iter 10 --epochs 3 --eval_freq 10 --data_dir $DATA"
                   [ -f "$DATA/ti_500K_pseudo_labeled.pickle" ] || bash "$0" wrn_data ;;
+    ramp_cont)    script=RAMP.py;      extra="--kl --max --gp --lbd 5 $resume"
+                  common="--lr-max 0.005 --lr-schedule=static --at_iter 10 --epochs 10 --save_freq 10 --eval_freq 10 --data_dir $DATA --finetune_model" ;;
+    ramp_samp)    script=RAMP.py;      extra="--kl --max --gp --lbd 5 --aat_sample $resume"
+                  common="--lr-max 0.005 --lr-schedule=static --at_iter 10 --epochs 10 --save_freq 10 --eval_freq 10 --data_dir $DATA --finetune_model" ;;
     eat)          script=eat_train.py; extra="" ;;
     max)          script=MAX.py;       extra="" ;;
   esac
@@ -101,9 +108,15 @@ train)
     [ -f "trained_models/$fname/log_eval_final.txt" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" \
         "ramp_official/$fname/log_eval_final.txt" "trained_models/$fname/log_eval_final.txt" >/dev/null 2>&1 || true
     [ -f "trained_models/$fname/log_eval_final.txt" ] && { echo "done already: $fname"; continue; }
+    c2=$common
+    case $method in ramp_cont|ramp_samp)  # start from the locked epoch-80 weights (raw state_dict) of the same seed
+      init="trained_models/ramp_scratch_l5_s$s/ep_80_0.pth"
+      [ -f "$init" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/ramp_scratch_l5_s$s/ep_80_0.pth" "$init"
+      c2="$common --model_name $init" ;;
+    esac
     fe="--final_eval --n_ex_final 1000"   # official eval on the same 1000 points, to cross-check ours
     echo ">> $fname on GPU $gpu"
-    CUDA_VISIBLE_DEVICES=$gpu python -u $script $common $extra $fe --seed $s --fname $fname 2>&1 \
+    CUDA_VISIBLE_DEVICES=$gpu python -u $script $c2 $extra $fe --seed $s --fname $fname 2>&1 \
       | grep --line-buffered -v "it/s\]" | sed -u "s/^/[$fname] /" | tee "$ROOT/logs_official_$fname.txt"
     if [ "$method" = ramp_wrn ]; then  # RAMP_cifar10_aug.py has no resume/Hub sync: push the results ourselves
       for f in ep_3_0.pth log_train.txt log_eval_final.txt; do
@@ -116,7 +129,7 @@ eval)
   method=$1; seeds=$2; gpu=${3:-0}
   for s in $seeds; do
     fname=$(run_name $method $s)
-    ep=3; case $method in ramp_scratch|aat_ramp|aat_rel|aat_flip) ep=80;; esac
+    ep=3; case $method in ramp_scratch|aat_ramp|aat_rel|aat_flip) ep=80;; ramp_cont|ramp_samp) ep=10;; esac
     ck="$EXT/trained_models/$fname/ep_${ep}_0.pth"
     [ -f "$ck" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/ep_${ep}_0.pth" "$ck"
     ecfg=official_eval; [ "$method" = ramp_wrn ] && ecfg=official_eval_wrn
@@ -125,6 +138,24 @@ eval)
     python "$ROOT/aat/hub.py" push "${HF_REPO:-none}" "$ROOT/runs_official/$fname/eval_autoattack.json" \
       "ramp_official/$fname/eval_autoattack.json" || true
   done
+  ;;
+avg2)
+  # H5: average RAMP epoch 60/70/80 weights and evaluate; seed 0 on GPU 0, seed 1 on GPU 1
+  ea=0; eb=0
+  CUDA_VISIBLE_DEVICES=0 python "$ROOT/scripts/average_ckpts.py" --seed 0 & a=$!
+  CUDA_VISIBLE_DEVICES=1 python "$ROOT/scripts/average_ckpts.py" --seed 1 & b=$!
+  wait $a || ea=$?
+  wait $b || eb=$?
+  exit $(( ea > eb ? ea : eb ))
+  ;;
+trainpair|evalpair)
+  # control on GPU 0, class-sampler on GPU 1, same seed list (seeds run one after the other on each GPU)
+  sub=${cmd%pair}; ea=0; eb=0
+  bash "$0" $sub ramp_cont "$1" 0 & a=$!
+  bash "$0" $sub ramp_samp "$1" 1 & b=$!
+  wait $a || ea=$?
+  wait $b || eb=$?
+  exit $(( ea > eb ? ea : eb ))
   ;;
 train2|eval2)
   # two seed lists in parallel, one per GPU; fails if either side fails
