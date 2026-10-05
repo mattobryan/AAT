@@ -2,7 +2,8 @@
 
 These inconsistencies are in the May 2025 thesis. Any of them would be spotted by a PhD panel
 or a reviewer, so the rebuild treats the thesis numbers as **hypotheses to re-test**, not results
-to reproduce. Page numbers refer to the PDF.
+to reproduce. Page numbers refer to the PDF (page index; the printed page number is one lower). Citations to Tables 7.2 and A.6,
+§7.8 and the Content Summary were checked against the submitted 77-page version on 5 October 2026.
 
 ## Results that contradict each other
 
@@ -98,3 +99,8 @@ to reproduce. Page numbers refer to the PDF.
     epoch 70, `external/ramp/utils.py`), not 0.05. Evaluation uses only APGD-CE and APGD-T of AutoAttack, and the unseen grid is
     APGD-CE only, so it is not comparable to standard-AA leaderboard numbers. The RobustBench Gowal2020 WRN checkpoint
     (`ramp_wrn`) was pre-trained with extra data, so a WRN fine-tune mixes capacity with data.
+19. **CIFAR-100 and variance (check against the 77-page submitted thesis, 5 Oct 2026).** The Content Summary says evaluation is
+    performed on CIFAR-10 and CIFAR-100, but no CIFAR-100 result appears in the text (the only other mentions are literature-review
+    citations of other papers). The text contains no occurrence of "seed" or "standard deviation"; only the RAMP baseline (Table 7.1)
+    is stated to be over five runs, so the ablation variants appear to be single runs without variance. Either run CIFAR-100 or drop
+    the claim, and report seeds and spread for every variant.
