@@ -1,7 +1,7 @@
-"""Diagnostic for H1 vs H4: per-class robust accuracy on TRAINING images vs TEST images.
+"""Diagnostic for D1 vs D2: per-class robust accuracy on TRAINING images vs TEST images.
 
-A large train-minus-test gap in a weak class = the model memorised it (data-limited, H1).
-Low train accuracy as well = optimisation- or capacity-limited (H4). Same fixed-eps AutoAttack
+A large train-minus-test gap in a weak class = the model memorised it (data-limited, D1).
+Low train accuracy as well = optimisation- or capacity-limited (D2). Same fixed-eps AutoAttack
 (APGD-CE + APGD-T) as the main evaluation, only the images differ. Reuses aat.evaluate unchanged.
 
     python scripts/train_vs_test.py --ckpt ep_80_0.pth --out runs_official/ramp_scratch_l5_s0/train_vs_test.json

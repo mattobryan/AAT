@@ -86,3 +86,8 @@ to reproduce. Page numbers refer to the PDF.
     better *alignment* for RAMP's weights, not what a different training schedule could reach. Two
     allocation rules at one step size do not show that reallocating ε "cannot" help. Statements that
     weak classes "lack robust features" or are "data-limited" are hypotheses (H1/H4), not findings.
+17. **Hypothesis-label collision (results-note review, 5 Oct 2026).** Item 16, `scripts/train_vs_test.py` and
+    the results note use "H1" for *data-limited* and "H4" for *optimisation/capacity-limited*, but README
+    defines H1 as "full AAT beats fixed-schedule AT on union" and H4 as "AAT generalizes to unseen threats".
+    Use distinct labels (e.g. D1 data-limited, D2 capacity-limited) for the weak-class diagnosis, and map the
+    aat_rel/aat_flip results to README H2 (class-feedback ε narrows the class gap), which they do not support.
