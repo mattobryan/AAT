@@ -1,0 +1,34 @@
+% overall
+\begin{tabular}{lrrrrrr}\toprule
+Run & Clean & $\ell_\infty$ & $\ell_2$ & $\ell_1$ & Union & Worst class \\\midrule
+RAMP & 81.30 & 45.70 & 66.45 & 48.40 & 44.40 & 12.78 \\
+aat\_rel & 82.90 & 45.80 & 66.85 & 48.55 & 44.65 & 10.83 \\
+aat\_flip & 78.15 & 41.40 & 64.15 & 45.40 & 40.15 & 7.22 \\
+cls\_ctrl & 82.50 & 45.00 & 65.40 & 48.50 & 43.45 & 12.78 \\
+cls\_fb & 82.65 & 45.70 & 65.80 & 48.60 & 44.55 & 13.33 \\
+\bottomrule\end{tabular}
+
+% per-class union
+\begin{tabular}{lrrrrr}\toprule
+Class & RAMP & aat\_rel & aat\_flip & cls\_ctrl & cls\_fb \\\midrule
+plane & 50.0 & 49.5 & 52.9 & 46.6 & 46.1 \\
+car & 59.0 & 63.5 & 52.8 & 59.6 & 57.9 \\
+bird & 29.5 & 27.0 & 26.5 & 29.0 & 29.5 \\
+cat & 13.1 & 12.1 & 9.2 & 16.0 & 16.5 \\
+deer & 12.8 & 11.7 & 9.4 & 12.8 & 13.3 \\
+dog & 27.9 & 23.8 & 36.6 & 24.4 & 25.0 \\
+frog & 54.9 & 54.5 & 52.7 & 50.4 & 57.1 \\
+horse & 63.2 & 63.7 & 57.8 & 62.3 & 63.2 \\
+ship & 60.4 & 67.5 & 42.9 & 63.7 & 61.8 \\
+truck & 65.6 & 65.1 & 55.5 & 62.4 & 66.5 \\
+\bottomrule\end{tabular}
+
+% unseen
+\begin{tabular}{lrrrrrr}\toprule
+Run & $\ell_\infty$ 12/255 & $\ell_\infty$ 16/255 & $\ell_2$ 1.0 & $\ell_2$ 1.5 & $\ell_1$ 18 & $\ell_1$ 24 \\\midrule
+RAMP & 29.0 & 13.0 & 48.6 & 28.8 & 34.1 & 21.5 \\
+aat\_rel & 31.0 & 14.5 & 48.4 & 29.8 & 35.3 & 22.9 \\
+aat\_flip & 24.8 & 10.9 & 45.7 & 25.0 & 30.6 & 19.6 \\
+cls\_ctrl & 29.2 & 13.0 & 49.0 & 28.2 & 34.2 & 21.5 \\
+cls\_fb & 29.2 & 13.2 & 48.1 & 28.4 & 33.9 & 21.4 \\
+\bottomrule\end{tabular}

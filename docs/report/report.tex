@@ -1,0 +1,146 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+
+\usepackage{booktabs,amsmath,amssymb,hyperref}
+\usepackage[font=small]{caption}
+\title{Does reallocating the perturbation budget or the training samples help the weak classes?\\
+\large A reproduction-based study of per-class adaptive adversarial training on top of RAMP (CIFAR-10)}
+\author{M.~Brian\thanks{Author line is a placeholder; edit before circulating.}\\\small Draft for supervisor review, 5 October 2026}
+\date{}
+\begin{document}
+\maketitle
+\begin{abstract}
+We test whether feedback-driven, per-class scheduling of the training perturbation budget $\varepsilon$ improves
+union robustness over $\{\ell_\infty,\ell_2,\ell_1\}$ on CIFAR-10 for a PreActResNet-18, using the official RAMP
+training code as the baseline and AutoAttack's APGD-CE and APGD-T attacks at \emph{fixed} $\varepsilon$ for every evaluation. Two budget-neutral
+controllers (more $\varepsilon$ for classes that are already robust, or the reverse) and a budget-neutral
+class-sampling fine-tune do not improve union robustness or the weakest classes over their controls; the reversed
+controller reduced union robustness in both seeds. The weakest classes (bird, cat, deer, dog) are also poorly fit on training images,
+which is consistent with an optimisation- or capacity-limited explanation, but the experiments are low-powered
+(2 seeds, about 100 test images per class) and do not separate that explanation from a data-limited one.
+We list the experiments needed to do so.
+\end{abstract}
+
+\section{Motivation and scope}
+The starting point is an MSc thesis on Adaptive Adversarial Training (AAT) that scheduled the perturbation budget and
+the attacked norm from per-class feedback. An audit of that thesis (\texttt{docs/thesis\_audit.md}) found
+inconsistent numbers and, most importantly, evaluation at the \emph{adaptive} $\varepsilon$, which inflates robust
+accuracy. This study therefore re-tests the idea under a clean protocol and does not reproduce the thesis numbers.
+The research question is whether feedback scheduling improves union robustness compared with fixed-schedule
+multi-norm adversarial training (RAMP~\cite{ramp}).
+
+\section{Setup}
+\textbf{Model and baseline.} PreActResNet-18 trained with the official RAMP code (pinned commit) for 80 epochs from
+scratch ($\lambda=5$, gradient projection), 2 seeds. The baseline reproduces the thesis Table~7.1 baseline to within one
+point on every metric.\\
+\textbf{Evaluation.} the APGD-CE and APGD-T attacks of AutoAttack~\cite{aa} (not the full suite: no FAB-T or Square) at fixed $\varepsilon=8/255$ ($\ell_\infty$), $0.5$
+($\ell_2$), $12$ ($\ell_1$) on the first 1000 CIFAR-10 test images; union robustness is the per-sample AND over the three
+norms. An $\varepsilon$ grid beyond the training budgets (APGD-CE only) measures robustness to unseen threat sizes.
+Results are taken from \texttt{eval\_autoattack.json}, never from the 200-image monitor in the training logs.\\
+\textbf{Arms.}
+\emph{aat\_rel}/\emph{aat\_flip}: RAMP plus a per-class training-$\varepsilon$ controller for the $\ell_\infty$ and $\ell_1$ training attacks (the $\ell_2$ component of RAMP is not modified), a budget-neutral variant of the thesis update (Eq.~4.19): the set-point $\tau$ is replaced by the class-mean training-attack accuracy, $\alpha=0.05$, updated once per epoch, $\varepsilon_c$ started at nominal, clipped to $[0.5,1.5]\times$nominal and projected so that the class mean equals nominal. aat\_rel gives more $\varepsilon$ to classes with higher training robust accuracy, aat\_flip the reverse (a fairness-style allocation~\cite{frl}).
+\emph{cls\_ctrl}/\emph{cls\_fb}: the locked epoch-80 RAMP weights continued for 10 epochs at RAMP's final-phase constant learning rate (0.005), resuming optimizer and GP state, with a
+with-replacement sampler drawing as many images as the dataset has; cls\_ctrl samples classes uniformly, cls\_fb with weights
+$w_c=\mathrm{clip}(1+(\bar A-A_c)/\bar A,\,0.5,\,1.5)$ (mean 1, so the number of images per epoch is unchanged), where $A_c$ is
+the per-class training-attack robust accuracy averaged over the $\ell_\infty$ and $\ell_1$ attacks, the clipped weights are re-projected to mean 1, and $w=1$ in the first fine-tune epoch.
+\emph{Checkpoint averaging}: uniform average of the epoch 60/70/80 weights (batch-norm statistics averaged, not recalibrated); the average spans the learning-rate drop at epoch 70 (epoch 60 was trained at 0.05).
+
+\section{Results}
+All tables are 2-seed means in percent. Per-class cells hold about 100 images (binomial standard error about 5 points),
+and two seeds support no significance claim, so every difference below is descriptive.
+
+\begin{table}[h]\centering\caption{Fixed-$\varepsilon$ AutoAttack, first 1000 test images.}
+\begin{tabular}{lrrrrrr}\toprule
+Run & Clean & $\ell_\infty$ & $\ell_2$ & $\ell_1$ & Union & Worst class \\\midrule
+RAMP & 81.30 & 45.70 & 66.45 & 48.40 & 44.40 & 12.78 \\
+aat\_rel & 82.90 & 45.80 & 66.85 & 48.55 & 44.65 & 10.83 \\
+aat\_flip & 78.15 & 41.40 & 64.15 & 45.40 & 40.15 & 7.22 \\
+cls\_ctrl & 82.50 & 45.00 & 65.40 & 48.50 & 43.45 & 12.78 \\
+cls\_fb & 82.65 & 45.70 & 65.80 & 48.60 & 44.55 & 13.33 \\
+\bottomrule\end{tabular}
+\end{table}
+
+\paragraph{$\varepsilon$ reallocation.} aat\_rel did not raise union over RAMP (44.65 vs 44.40), gained 1.6 clean points,
+and lowered worst-class union in both seeds (10.0 and 11.7 vs 13.3 and 12.2). aat\_flip lowered union (40.15); both of its
+seeds (42.0, 38.3) are below both RAMP seeds (45.7, 43.1). Neither supports the hypothesis that class-feedback
+$\varepsilon$ narrows the class gap: worst-class union fell in both arms.
+
+\paragraph{Sample reallocation.} Feedback class sampling was within noise of the uniform control (union 44.55 vs 43.45;
+worst class 13.33 vs 12.78; mean union over bird, cat, deer and dog 21.1 vs 20.6), and neither arm exceeded locked epoch 80
+by more than 0.2 points (cls\_fb 44.55, cls\_ctrl 43.45 vs 44.40). The $\varepsilon$ grid differs by at most one point between
+the arms. The binomial standard error alone is about 5 points per class, so per-class effects of several points cannot be resolved, and a small benefit cannot be excluded.
+Oversampling repeats images, so it does not test whether more \emph{distinct} data would help.
+
+\paragraph{Checkpoint averaging.} Averaging lowered worst-class union in both seeds ($13.3\to10.7$, $12.2\to9.7$; the worst
+class moved from deer to cat, about three images), changed union by $-1.3$ and $+2.8$ and clean accuracy by $-0.8$ and
+$-2.2$. This does not support the claim that the worst-class number is mostly checkpoint noise, but given the size of the
+effect and the unrecalibrated batch-norm statistics it does not refute it either.
+
+\begin{table}[h]\centering\caption{Per-class union robustness (\%), 2-seed means; $\approx$100 images per cell.}
+\begin{tabular}{lrrrrr}\toprule
+Class & RAMP & aat\_rel & aat\_flip & cls\_ctrl & cls\_fb \\\midrule
+plane & 50.0 & 49.5 & 52.9 & 46.6 & 46.1 \\
+car & 59.0 & 63.5 & 52.8 & 59.6 & 57.9 \\
+bird & 29.5 & 27.0 & 26.5 & 29.0 & 29.5 \\
+cat & 13.1 & 12.1 & 9.2 & 16.0 & 16.5 \\
+deer & 12.8 & 11.7 & 9.4 & 12.8 & 13.3 \\
+dog & 27.9 & 23.8 & 36.6 & 24.4 & 25.0 \\
+frog & 54.9 & 54.5 & 52.7 & 50.4 & 57.1 \\
+horse & 63.2 & 63.7 & 57.8 & 62.3 & 63.2 \\
+ship & 60.4 & 67.5 & 42.9 & 63.7 & 61.8 \\
+truck & 65.6 & 65.1 & 55.5 & 62.4 & 66.5 \\
+\bottomrule\end{tabular}
+\end{table}
+
+\paragraph{Class by norm.} For RAMP, in the 2-seed mean, union is at most 2.5 points below $\min(\ell_\infty,\ell_1)$ in every
+class (per seed up to 4.4, deer seed 1) and 1.3 points overall. The weak classes are weak under every norm. For RAMP's weights,
+better alignment across norms could add at most about 1.3 points of union; this does not bound what a different schedule could reach.
+
+\paragraph{Unseen threat sizes.} Table~\ref{tab:unseen} shows the grid beyond the training budgets. aat\_rel is one to two points above
+RAMP at five of the six budgets ($\ell_2$ at 1.0 is 0.2 below) and aat\_flip is below at every budget; only $\ell_\infty$ at 16/255 has non-overlapping seed ranges.
+We regard this as a direction to test with a pre-specified protocol and more images, not as a finding.
+
+\begin{table}[h]\centering\caption{Robust accuracy (\%) at budgets larger than training (APGD-CE), 2-seed means.}\label{tab:unseen}
+\begin{tabular}{lrrrrrr}\toprule
+Run & $\ell_\infty$ 12/255 & $\ell_\infty$ 16/255 & $\ell_2$ 1.0 & $\ell_2$ 1.5 & $\ell_1$ 18 & $\ell_1$ 24 \\\midrule
+RAMP & 29.0 & 13.0 & 48.6 & 28.8 & 34.1 & 21.5 \\
+aat\_rel & 31.0 & 14.5 & 48.4 & 29.8 & 35.3 & 22.9 \\
+aat\_flip & 24.8 & 10.9 & 45.7 & 25.0 & 30.6 & 19.6 \\
+cls\_ctrl & 29.2 & 13.0 & 49.0 & 28.2 & 34.2 & 21.5 \\
+cls\_fb & 29.2 & 13.2 & 48.1 & 28.4 & 33.9 & 21.4 \\
+\bottomrule\end{tabular}
+
+\end{table}
+
+\section{Why are the weak classes weak?}
+To separate a data-limited from an optimisation- or capacity-limited explanation we evaluated the locked RAMP epoch-80 weights on the
+first 1000 \emph{training} and test images (unaugmented; unweighted class means over 2 seeds). Union robustness of the weak four classes is
+32.8 on training and 20.8 on test images (gap 12.0); for the other six classes it is 69.5 and 58.9 (gap 10.5). Clean accuracy of the weak
+four on training images is 79.1, against 95.3 for the others. The weak classes are therefore poorly fit even on images the model was trained
+on, and their train--test gap is not distinguishable from that of the other classes (cf.\ robust overfitting~\cite{rice}). Per class, cat (4--6
+points) and dog (4--6) have small gaps while deer (20--28) and bird (11--17) have large ones, as do some strong classes; frog is 0 and $-7$.
+
+\section{Interpretation and limits}
+None of the three reallocation experiments raised union robustness or the weak classes. Reversing the $\varepsilon$ allocation lowered union (by about 4 points in both seeds) and worst-class union, but not the mean of the four weak classes (20.4 vs 20.8); aat\_rel's worst-class union was lower in both seeds (descriptive). The weak classes are also poorly fit on training images. This is consistent with an optimisation- or
+capacity-limited explanation (D2), but equally with low power, narrow reallocation ranges, short fine-tuning and repeated images, and nothing here
+changed model capacity or the number of distinct training images. D1 (the weak classes are data-limited) and D2 therefore remain open. D1 and D2
+label this diagnosis only; they are not the hypotheses H1--H4 of the project README.\\
+\textbf{Limits.} Two seeds; first 1000 test images (binomial standard error about 1.6 points overall, about 5 per class); one fine-tuning
+recipe per method; one model size; one dataset; run-to-run and checkpoint-to-checkpoint union variation of up to about 4 points.
+
+\section{Proposed next steps}
+\begin{enumerate}
+\item \textbf{Power.} Re-evaluate the final models on the full 10\,000-image test set (about ten times the 33-minute per-model cost, i.e.\ about 5.5 GPU-hours per model and about 55 for ten models, an estimate; or APGD-CE-only for the unseen grid), and add seeds (five or more) for RAMP, aat\_rel and the controls.
+\item \textbf{Unseen threats.} Pre-specify the aat\_rel versus RAMP comparison on the $\varepsilon$ grid and a held-out norm, using the extra images and seeds, before claiming a benefit.
+\item \textbf{Capacity.} Fine-tune a pre-trained WRN-28-10 with the RAMP recipe. Rough estimate on a Kaggle T4, scaling the measured PreActResNet-18 epoch time (about 850\,s) by the roughly 9-fold compute ratio and assuming 3 fine-tune epochs: about 6 hours of training plus 4--5 hours of AutoAttack evaluation per seed on CIFAR-10 alone, and about 12--14 hours of training (the project handoff note says 14+) with the official 500K auxiliary set, which doubles the images per epoch. These are estimates, not measurements; memory at batch size 128 is untested. Caveats: the CIFAR-10-only variant is not the official RAMP WRN recipe (that script requires the 500K pseudo-labelled set, for which no verified source is available), and the RobustBench Gowal2020 checkpoint was pre-trained with extra data, so this experiment mixes capacity with data and cannot by itself separate D1 from D2.
+\item \textbf{Other datasets.} CIFAR-100 needs a new locked baseline and the full test set (100 images per class instead of 10 in the first 1000), so it is a generalisation check, not a cheap one.
+\item \textbf{Full method.} The full thesis method (adaptive norm weights, hybrid loss, logit pairing) has not been run.
+\end{enumerate}
+
+\begin{thebibliography}{9}
+\bibitem{ramp} E.~Jiang and G.~Singh. RAMP: Boosting adversarial robustness against multiple $\ell_p$ perturbations. NeurIPS 2024 (verify exact title and venue before submission).
+\bibitem{aa} F.~Croce and M.~Hein. Reliable evaluation of adversarial robustness with an ensemble of diverse parameter-free attacks. ICML 2020.
+\bibitem{frl} H.~Xu, X.~Liu, Y.~Li, A.~Jain and J.~Tang. To be robust or to be fair: towards fairness in adversarial training. ICML 2021.
+\bibitem{rice} L.~Rice, E.~Wong and J.~Z.~Kolter. Overfitting in adversarially robust deep learning. ICML 2020.
+\end{thebibliography}
+\end{document}

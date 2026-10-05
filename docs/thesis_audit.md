@@ -91,3 +91,10 @@ to reproduce. Page numbers refer to the PDF.
     defines H1 as "full AAT beats fixed-schedule AT on union" and H4 as "AAT generalizes to unseen threats".
     Use distinct labels (e.g. D1 data-limited, D2 capacity-limited) for the weak-class diagnosis, and map the
     aat_rel/aat_flip results to README H2 (class-feedback ε narrows the class gap), which they do not support.
+18. **Methods faithfulness of the AAT-on-RAMP arms (report review, 5 Oct 2026).** The ε controller changes only RAMP's
+    ℓ∞ and ℓ1 training attacks (`baselines/aat_on_ramp.patch`), is a budget-neutral variant of Eq. 4.19 (τ replaced by the
+    class-mean training-attack accuracy, α = 0.05, clipped to [0.5, 1.5]×nominal and projected to mean nominal), and is not
+    the thesis controller. The class-sampling fine-tune runs at RAMP's final-phase lr 0.005 (`static` schedule is lr-max/10 after
+    epoch 70, `external/ramp/utils.py`), not 0.05. Evaluation uses only APGD-CE and APGD-T of AutoAttack, and the unseen grid is
+    APGD-CE only, so it is not comparable to standard-AA leaderboard numbers. The RobustBench Gowal2020 WRN checkpoint
+    (`ramp_wrn`) was pre-trained with extra data, so a WRN fine-tune mixes capacity with data.

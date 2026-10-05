@@ -1,7 +1,7 @@
 # Results note: does reallocating ε or samples help the weak classes? (4–5 October 2026)
 
 Status: draft for reviewer sign-off. All numbers come from `eval_autoattack.json` files in `baselines/results/`
-(AutoAttack APGD-CE + APGD-T at fixed ε = 8/255, 0.5, 12; first 1000 CIFAR-10 test images; union = per-sample
+(the APGD-CE and APGD-T attacks of AutoAttack (not the full suite) at fixed ε = 8/255, 0.5, 12; first 1000 CIFAR-10 test images; union = per-sample
 AND over the three norms; PreActResNet-18; 2 seeds per arm). Per-class cells hold about 100 images (binomial
 standard error about 5 points), and 2 seeds cannot support significance claims, so every difference below is
 descriptive.
@@ -12,7 +12,7 @@ descriptive.
 |---|---|
 | RAMP | Official RAMP, 80 epochs from scratch (locked baseline; reproduces thesis Table 7.1 within 1 point) |
 | aat_rel / aat_flip | RAMP plus a per-class, per-norm training-ε controller with the mean ε held at nominal. aat_rel gives classes with higher training robust accuracy more ε; aat_flip does the reverse |
-| cls_ctrl / cls_fb | Locked epoch-80 RAMP weights continued for 10 epochs (static lr 0.05) with a with-replacement sampler. cls_ctrl: uniform class weights. cls_fb: weights clip(1 + (Ā − A_c)/Ā, 0.5, 1.5), mean 1, from per-class training-attack robust accuracy |
+| cls_ctrl / cls_fb | Locked epoch-80 RAMP weights continued for 10 epochs (RAMP's final-phase constant lr 0.005) with a with-replacement sampler. cls_ctrl: uniform class weights. cls_fb: weights clip(1 + (Ā − A_c)/Ā, 0.5, 1.5), mean 1, from per-class training-attack robust accuracy |
 | avg | Uniform average of the epoch 60/70/80 weights of RAMP (BN statistics averaged, not recalibrated) |
 
 ## Results
@@ -33,8 +33,7 @@ Overall (2-seed means, %):
    (class-feedback ε narrows the class gap): worst-class union fell in both arms.
 2. **Sample reallocation.** Over 2 seeds, feedback class sampling was within noise of the uniform control
    (union 44.55 vs 43.45; worst-class 13.33 vs 12.78; mean union over bird, cat, deer, dog 21.1 vs 20.6), and
-   neither arm exceeded locked epoch 80 by more than 0.2 points (cls_fb 44.55, cls_ctrl 43.45 vs 44.40). The unseen-ε grid differs by at most 1 point between the arms. This test
-   is underpowered for effects under about 5 points per class, so a small benefit cannot be excluded. Oversampling
+   neither arm exceeded locked epoch 80 by more than 0.2 points (cls_fb 44.55, cls_ctrl 43.45 vs 44.40). The unseen-ε grid differs by at most 1 point between the arms. The binomial standard error alone is about 5 points per class, so per-class effects of several points cannot be resolved and a small benefit cannot be excluded. Oversampling
    repeats images, so it does not test whether more distinct data would help.
 3. **Checkpoint averaging.** Uniform averaging of the epoch 60/70/80 weights lowered worst-class union in both
    seeds (13.3→10.7, 12.2→9.7; the worst class moved from deer to cat, about 3 images), changed union by −1.3/+2.8
@@ -46,7 +45,7 @@ Overall (2-seed means, %):
    union; this does not bound what a different schedule could reach.
 5. **Train versus test (RAMP epoch 80, first 1000 train and test images; figures are unweighted class means
    over 2 seeds).** Union on the weak four classes is 32.8 on training images and 20.8 on test images (gap 12.0);
-   on the other six classes it is 69.45 and 58.93 (gap 10.5). Clean accuracy of the weak four on training images
+   on the other six classes it is 69.5 and 58.9 (gap 10.5). Clean accuracy of the weak four on training images
    is 79.1, against 95.3 for the others. The weak classes are therefore also poorly fit on images the model was
    trained on, and their train-test gap is not distinguishable from that of the other classes. Per class, cat
    (4 to 6) and dog (4 to 6) have small gaps; deer (20 to 28) and bird (11 to 17) have large ones, as do some
@@ -57,7 +56,7 @@ Overall (2-seed means, %):
 ## Interpretation (hypotheses, not findings)
 
 None of the three reallocation experiments (ε by relative robustness, ε reversed, samples) raised union or the
-weak classes; reversing the ε allocation (aat_flip) lowered both, and aat_rel lowered worst-class union. The weak
+weak classes. Reversing the ε allocation (aat_flip) lowered union (by about 4 points in both seeds) and worst-class union, but not the mean of the four weak classes (20.4 vs 20.8); aat_rel's worst-class union was lower in both seeds (descriptive). The weak
 classes are also poorly fit on training images. That is consistent with an optimisation- or capacity-limited
 explanation (D2), but equally with low power, narrow reallocation ranges, short fine-tuning and repeated images,
 and nothing here changed model capacity or the number of distinct training images. D1 (the weak classes are
