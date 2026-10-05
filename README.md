@@ -1,7 +1,7 @@
 # AAT: Adaptive Adversarial Training
 
 A clean rebuild of *Adaptive Adversarial Training: A Curriculum-Based Approach to Robustness*
-(M. Brian, MSc thesis, University of Szeged, 2025). It is designed to run end to end on the free
+(B. O. Matoke, MSc thesis, University of Szeged, 2025). It is designed to run end to end on the free
 Kaggle GPU tier (2×T4, ~30 GPU-h/week) in one week.
 
 ## Research question

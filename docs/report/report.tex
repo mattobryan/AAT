@@ -5,7 +5,7 @@
 \usepackage[font=small]{caption}
 \title{Does reallocating the perturbation budget or the training samples help the weak classes?\\
 \large A reproduction-based study of per-class adaptive adversarial training on top of RAMP (CIFAR-10)}
-\author{M.~Brian\thanks{Author line is a placeholder; edit before circulating.}\\\small Draft for supervisor review, 5 October 2026}
+\author{Matoke Brian\\\small Department of Computer Science, University of Szeged\\\small Draft for supervisor review, 5 October 2026}
 \date{}
 \begin{document}
 \maketitle
@@ -22,7 +22,7 @@ We list the experiments needed to do so.
 \end{abstract}
 
 \section{Motivation and scope}
-The starting point is an MSc thesis on Adaptive Adversarial Training (AAT) that scheduled the perturbation budget and
+The starting point is the author's MSc thesis on Adaptive Adversarial Training (AAT)~\cite{thesis} that scheduled the perturbation budget and
 the attacked norm from per-class feedback. An audit of that thesis (\texttt{docs/thesis\_audit.md}) found
 inconsistent numbers and, most importantly, evaluation at the \emph{adaptive} $\varepsilon$, which inflates robust
 accuracy. This study therefore re-tests the idea under a clean protocol and does not reproduce the thesis numbers.
@@ -138,6 +138,7 @@ recipe per method; one model size; one dataset; run-to-run and checkpoint-to-che
 \end{enumerate}
 
 \begin{thebibliography}{9}
+\bibitem{thesis} B.~O.~Matoke. Adaptive Adversarial Training: A Curriculum-Based Approach to Robustness. MSc thesis, Department of Computer Science, University of Szeged, 2025.
 \bibitem{ramp} E.~Jiang and G.~Singh. RAMP framework: Boosting adversarial robustness against multiple-$\ell_p$ perturbations. NeurIPS 2024.
 \bibitem{aa} F.~Croce and M.~Hein. Reliable evaluation of adversarial robustness with an ensemble of diverse parameter-free attacks. ICML 2020.
 \bibitem{frl} H.~Xu, X.~Liu, Y.~Li, A.~Jain and J.~Tang. To be robust or to be fair: towards fairness in adversarial training. ICML 2021.
