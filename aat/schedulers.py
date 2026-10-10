@@ -12,6 +12,23 @@ import torch
 
 
 # --------------------------------------------------------------------------- epsilon
+def project_mean(eps, target, lo, hi, iters=20):
+    """Shift per-class budgets so that eps.mean() == target while staying inside [lo, hi].
+
+    Only classes that can still move in the needed direction absorb the gap, so a class sitting at a bound
+    does not block the projection. Used by the budget-neutral class-feedback controller (mean_preserve)."""
+    eps = eps.clamp(lo, hi)
+    for _ in range(iters):
+        gap = float(target - eps.mean())
+        if abs(gap) < 1e-9:
+            break
+        free = (eps < hi) if gap > 0 else (eps > lo)
+        if not bool(free.any()):
+            break
+        eps = torch.where(free, eps + gap * eps.numel() / free.sum(), eps).clamp(lo, hi)
+    return eps
+
+
 class EpsScheduler:
     """Per-norm budget controller.
 
@@ -56,6 +73,9 @@ class EpsScheduler:
             elif m == "class_feedback":
                 a = fb["class_current"][p].to(self.device)
                 self.state[p] = (self.state[p] + alpha * (a - tau) * self.nominal[p]).clamp(lo, hi)
+                if c.get("mean_preserve"):  # budget-neutral: reallocate eps across classes, keep the mean fixed
+                    target = c.get("mean_frac", c.get("init_frac", 1.0)) * self.nominal[p]
+                    self.state[p] = project_mean(self.state[p], target, lo, hi)
             if "class_nominal" in fb:
                 mom = c.get("ema", 0.7)
                 self.class_rob_ema[p] = mom * self.class_rob_ema[p] + (1 - mom) * fb["class_nominal"][p].to(self.device)

@@ -89,3 +89,22 @@ def test_losses():
     y = torch.randint(0, 10, (8,))
     kl, _ = pairing_loss(logits, {p: torch.rand(8) for p in ce}, y)
     assert kl >= 0
+
+
+def test_mean_preserving_class_feedback_keeps_budget_and_bounds():
+    norms = ["linf"]
+    cfg = {"linf": {"nominal": 1.0, "mode": "class_feedback", "init_frac": 1.0, "min_frac": 0.5,
+                    "max_frac": 1.5, "alpha": 0.2, "tau": 0.3, "mean_preserve": True}}
+    s = EpsScheduler(cfg, norms, 10, 10, "cpu")
+    for _ in range(30):
+        s.update(_fb(norms, [0.8]))  # most classes sit above tau, so the raw controller would keep raising the budget
+        e = s.class_eps("linf")
+        assert abs(float(e.mean()) - 1.0) < 1e-5
+        assert float(e.min()) >= 0.5 - 1e-6 and float(e.max()) <= 1.5 + 1e-6
+    assert e[0] < e[-1]  # the ordering by robustness survives the projection
+    # without mean_preserve the same feedback inflates the budget above nominal
+    cfg["linf"]["mean_preserve"] = False
+    s2 = EpsScheduler(cfg, norms, 10, 10, "cpu")
+    for _ in range(30):
+        s2.update(_fb(norms, [0.8]))
+    assert float(s2.class_eps("linf").mean()) > 1.05

@@ -1,0 +1,7 @@
+# Class-feedback eps alone (3B), budget-matched: start at nominal, mean eps per norm held at nominal.
+base: v3b_classeps.yaml
+name: v3b_classeps_nominal
+eps:
+  linf: {init_frac: 1.0, max_frac: 1.5, mean_preserve: true}
+  l2: {init_frac: 1.0, max_frac: 1.5, mean_preserve: true}
+  l1: {init_frac: 1.0, max_frac: 1.5, mean_preserve: true}

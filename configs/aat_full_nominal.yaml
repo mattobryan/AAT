@@ -1,0 +1,9 @@
+# Budget-matched full AAT: classes start at nominal eps and the controller only reallocates eps across classes
+# (mean eps per norm is held at nominal, like aat_rel on the RAMP code). Compare against v3a_max, same budget.
+# aat_full itself starts at 0.75 x nominal and trained at about three quarters of the evaluation budget.
+base: aat_full.yaml
+name: aat_full_nominal
+eps:
+  linf: {init_frac: 1.0, max_frac: 1.5, mean_preserve: true}
+  l2: {init_frac: 1.0, max_frac: 1.5, mean_preserve: true}
+  l1: {init_frac: 1.0, max_frac: 1.5, mean_preserve: true}
