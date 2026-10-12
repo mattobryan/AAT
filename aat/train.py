@@ -44,6 +44,10 @@ def make_lr_lambda(cfg, steps_per_epoch):
     return f
 
 
+def model_has_gate(model):
+    return bool(getattr(model[1] if isinstance(model, torch.nn.Sequential) else model, "gated_K", 0))
+
+
 def input_grad_norm(model, x, y):
     was = model.training
     model.eval()
@@ -199,7 +203,8 @@ def train(cfg):
 
         model.train()
         agg = {"loss": 0.0, "n": 0, "kl": 0.0, "sec_ratio": 0.0, "norm_counts": {p: 0 for p in norms},
-               "adv_correct": {p: 0 for p in norms}, "adv_seen": {p: 0 for p in norms}}
+               "adv_correct": {p: 0 for p in norms}, "adv_seen": {p: 0 for p in norms},
+               "gate_correct": {p: 0 for p in norms}}
         for i, (x, y) in enumerate(train_loader):
             x = x.to(dev, non_blocking=True).to(memory_format=torch.channels_last)
             y = y.to(dev, non_blocking=True)
@@ -225,6 +230,13 @@ def train(cfg):
                 kl, kst = pairing_loss(logits, ce, y)
                 loss = loss + lcfg["lambda_kl"] * kl
                 agg["kl"] += kst["kl_mean"]
+            gate_logits = getattr(model[1] if isinstance(model, torch.nn.Sequential) else model, "last_gate_logits", None)
+            gate_chunks = None
+            if gate_logits is not None:  # squint model: supervise the gate with the threat label (index in cfg["norms"])
+                gate_chunks = dict(zip(active, gate_logits.float().split(len(y))))
+                if lcfg.get("lambda_gate", 0) > 0:
+                    loss = loss + lcfg["lambda_gate"] * sum(
+                        F.cross_entropy(gate_chunks[p], torch.full_like(y, norms.index(p))) for p in active) / len(active)
             clean_ce = F.cross_entropy(chunks[-1], y) if need_clean else None
             if lcfg.get("lambda_clean", 0) > 0:
                 loss = loss + lcfg["lambda_clean"] * clean_ce
@@ -250,6 +262,8 @@ def train(cfg):
             for p in active:
                 agg["adv_correct"][p] += int((logits[p].argmax(1) == y).sum())
                 agg["adv_seen"][p] += len(y)
+                if gate_chunks is not None:
+                    agg["gate_correct"][p] += int((gate_chunks[p].argmax(1) == norms.index(p)).sum())
             if cfg.get("limit_batches") and i + 1 >= cfg["limit_batches"]:
                 break
 
@@ -259,6 +273,8 @@ def train(cfg):
                "train_adv_acc": {p: agg["adv_correct"][p] / max(1, agg["adv_seen"][p]) for p in norms},
                "norm_counts": agg["norm_counts"], "eps": eps_s.summary(), "norm_sched": norm_s.summary(),
                "epoch_time_s": time.time() - t0, "feedback_time_s": t_fb}
+        if model_has_gate(model):
+            rec["gate_acc"] = {p: agg["gate_correct"][p] / max(1, agg["adv_seen"][p]) for p in norms}
         if fb is not None:
             rec["feedback"] = {k: {p: (v.tolist() if torch.is_tensor(v) else v) for p, v in d.items()} for k, d in fb.items()}
         m = cfg["monitor"]

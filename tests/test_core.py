@@ -108,3 +108,38 @@ def test_mean_preserving_class_feedback_keeps_budget_and_bounds():
     for _ in range(30):
         s2.update(_fb(norms, [0.8]))
     assert float(s2.class_eps("linf").mean()) > 1.05
+
+
+def test_gated_model_shapes_gate_and_gradients():
+    from aat.models import GatedBN, build_model
+    torch.manual_seed(0)
+    m = build_model("preactresnet18_gated3")
+    assert any(isinstance(mod, GatedBN) for mod in m.modules())
+    # every block / final BN is a GatedBN: the only affine BatchNorm2d left is the gate head's own
+    assert [n for n, mod in m.named_modules() if isinstance(mod, nn.BatchNorm2d) and mod.affine] == ["1.gate_bn"]
+    m.eval()
+    x = torch.rand(4, 3, 32, 32, requires_grad=True)
+    out = m(x)
+    gl = m[1].last_gate_logits
+    assert out.shape == (4, 10) and gl.shape == (4, 3)
+    g = next(mod.g for mod in m.modules() if isinstance(mod, GatedBN))
+    assert torch.allclose(g.sum(1), torch.ones(4), atol=1e-5)
+    gx, = torch.autograd.grad(out.sum(), x, retain_graph=True)
+    assert gx.abs().sum() > 0
+    gx_gate, = torch.autograd.grad(gl.sum(), x, retain_graph=True)
+    assert gx_gate.abs().sum() > 0
+    # gradients must flow through the gate into the per-threat affine and the gate head
+    m.zero_grad()
+    out.sum().backward()
+    assert m[1].gate_fc.weight.grad.abs().sum() > 0 and m[1].bn.gamma.grad.abs().sum() > 0
+    assert m[0].mean.shape == (1, 3, 1, 1) and set(k.split(".")[0] for k in m.state_dict()) == {"0", "1"}
+
+
+def test_plain_model_path_unchanged():
+    from aat.models import GatedBN, build_model
+    m = build_model("preactresnet18")
+    assert not any(isinstance(mod, GatedBN) for mod in m.modules())
+    assert not hasattr(m[1], "gate_fc") and m[1].last_gate_logits is None
+    assert "1.bn.weight" in m.state_dict() and "1.layer1.0.bn1.running_mean" in m.state_dict()
+    m.eval()
+    assert m(torch.rand(2, 3, 32, 32)).shape == (2, 10) and m[1].last_gate_logits is None

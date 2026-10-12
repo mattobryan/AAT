@@ -1,0 +1,5 @@
+# Ablation of squint_v0: same gated architecture, no gate supervision (lambda_gate 0).
+base: v3a_max.yaml
+name: squint_v0_nogate
+model: preactresnet18_gated3
+loss: {aggregate: max, lambda_gate: 0}

@@ -1,4 +1,6 @@
 """PreActResNet-18 (He et al., 2016) as used by RAMP / E-AT on CIFAR."""
+import re
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,15 +31,39 @@ def _act(name):
     return lambda t: F.softplus(t, beta=beta)
 
 
+class GatedBN(nn.Module):
+    """BatchNorm (shared statistics, no affine) followed by a per-sample, gate-weighted affine:
+    gamma_eff = g @ gamma, beta_eff = g @ beta, with g (N, K) a softmax gate set on `self.g` by the parent
+    model before the blocks run. K = number of threat types."""
+
+    def __init__(self, c, K):
+        super().__init__()
+        self.bn = nn.BatchNorm2d(c, affine=False)
+        self.gamma = nn.Parameter(torch.ones(K, c))
+        self.beta = nn.Parameter(torch.zeros(K, c))
+        self.g = None
+
+    def forward(self, x):
+        assert self.g is not None, "GatedBN.g must be set by the parent model before forward"
+        g = self.g.to(x.dtype)
+        gamma, beta = g @ self.gamma.to(x.dtype), g @ self.beta.to(x.dtype)
+        return self.bn(x) * gamma[:, :, None, None] + beta[:, :, None, None]
+
+
+def _norm_layer(gated_K):
+    return nn.BatchNorm2d if not gated_K else (lambda c: GatedBN(c, gated_K))
+
+
 class PreActBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1, activation="relu"):
+    def __init__(self, in_planes, planes, stride=1, activation="relu", gated_K=0):
         super().__init__()
         self.act = _act(activation)
-        self.bn1 = nn.BatchNorm2d(in_planes)
+        norm = _norm_layer(gated_K)
+        self.bn1 = norm(in_planes)
         self.conv1 = nn.Conv2d(in_planes, planes, 3, stride, 1, bias=False)
-        self.bn2 = nn.BatchNorm2d(planes)
+        self.bn2 = norm(planes)
         self.conv2 = nn.Conv2d(planes, planes, 3, 1, 1, bias=False)
         self.shortcut = None
         if stride != 1 or in_planes != planes:
@@ -52,26 +78,40 @@ class PreActBlock(nn.Module):
 
 
 class PreActResNet(nn.Module):
-    def __init__(self, num_blocks=(2, 2, 2, 2), num_classes=10, activation="relu"):
+    def __init__(self, num_blocks=(2, 2, 2, 2), num_classes=10, activation="relu", gated_K=0):
+        """gated_K > 0: "squint" model. A gate head on the stem features predicts a softmax over K threat types
+        from the (possibly perturbed) input, and every BatchNorm becomes a GatedBN conditioned on it."""
         super().__init__()
-        self.in_planes, self.activation = 64, activation
+        self.in_planes, self.activation, self.gated_K = 64, activation, gated_K
         self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
         self.layer1 = self._make_layer(64, num_blocks[0], 1)
         self.layer2 = self._make_layer(128, num_blocks[1], 2)
         self.layer3 = self._make_layer(256, num_blocks[2], 2)
         self.layer4 = self._make_layer(512, num_blocks[3], 2)
-        self.bn = nn.BatchNorm2d(512)
+        self.bn = _norm_layer(gated_K)(512)
         self.linear = nn.Linear(512, num_classes)
+        self.last_gate_logits = None
+        if gated_K:
+            self.gate_conv = nn.Conv2d(64, 32, 3, 2, 1, bias=False)
+            self.gate_bn = nn.BatchNorm2d(32)
+            self.gate_fc = nn.Linear(32, gated_K)
 
     def _make_layer(self, planes, n, stride):
         layers = []
         for s in [stride] + [1] * (n - 1):
-            layers.append(PreActBlock(self.in_planes, planes, s, self.activation))
+            layers.append(PreActBlock(self.in_planes, planes, s, self.activation, self.gated_K))
             self.in_planes = planes
         return nn.Sequential(*layers)
 
     def forward(self, x):
         out = self.conv1(x)
+        if self.gated_K:
+            h = F.adaptive_avg_pool2d(F.relu(self.gate_bn(self.gate_conv(out))), 1).flatten(1)
+            self.last_gate_logits = self.gate_fc(h)  # (N, K), raw logits; differentiable w.r.t. the input
+            g = F.softmax(self.last_gate_logits, dim=1)
+            for m in self.modules():
+                if isinstance(m, GatedBN):
+                    m.g = g
         out = self.layer4(self.layer3(self.layer2(self.layer1(out))))
         out = F.relu(self.bn(out))
         out = F.adaptive_avg_pool2d(out, 1).flatten(1)
@@ -81,13 +121,17 @@ class PreActResNet(nn.Module):
 def build_model(name: str = "preactresnet18", dataset: str = "cifar10") -> nn.Module:
     """preactresnet18          ReLU, CIFAR normalisation inside the model
     preactresnet18_softplus  the RAMP / E-AT architecture (softplus(beta=1) in the blocks, no input
-                             normalisation); loads the official pretr_{Linf,L1,L2}.pth checkpoints"""
+                             normalisation); loads the official pretr_{Linf,L1,L2}.pth checkpoints
+    preactresnet18_gated<K>  input-conditioned "squint" model: gate head + K-way gated BatchNorm affines"""
     num_classes = 100 if dataset == "cifar100" else 10
     mean, std = (CIFAR100_MEAN, CIFAR100_STD) if dataset == "cifar100" else (CIFAR10_MEAN, CIFAR10_STD)
     if name == "preactresnet18":
         return nn.Sequential(Normalize(mean, std), PreActResNet((2, 2, 2, 2), num_classes))
     if name == "preactresnet18_softplus":
         return nn.Sequential(nn.Identity(), PreActResNet((2, 2, 2, 2), num_classes, activation="softplus1"))
+    mg = re.fullmatch(r"preactresnet18_gated(\d+)", name)
+    if mg:
+        return nn.Sequential(Normalize(mean, std), PreActResNet((2, 2, 2, 2), num_classes, gated_K=int(mg.group(1))))
     if name.startswith("rb:"):
         # RobustBench architecture by model-zoo id (e.g. rb:Gowal2020Uncovering_28_10_extra). Built WITHOUT
         # downloading its weights; normalisation is inside the RobustBench model, so inputs stay in [0, 1].

@@ -1,0 +1,6 @@
+# Squint: input-conditioned model (gate head + gated BatchNorm), trained with per-sample worst-case (MAX)
+# over all three norms plus an auxiliary threat-classification loss on the gate.
+base: v3a_max.yaml
+name: squint_v0
+model: preactresnet18_gated3
+loss: {aggregate: max, lambda_gate: 0.5}

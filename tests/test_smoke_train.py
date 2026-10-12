@@ -21,7 +21,7 @@ def _fake(root, train=True, download=False, transform=None):
 
 def test_smoke(tmp_path, monkeypatch):
     monkeypatch.setattr(data, "_dataset_cls", lambda name: _fake)
-    for name in ["aat_full", "ramp", "v1b_sample"]:
+    for name in ["aat_full", "ramp", "v1b_sample", "squint_v0"]:
         cfg = load_config(os.path.join(CFG, f"{name}.yaml"), [
             f"out_dir={tmp_path}", "init_from=null", "train.epochs=2", "train.batch_size=32", "limit_batches=2",
             "data.feedback_size=100", "data.num_workers=0", "monitor.n=64", "monitor.every=1", "feedback.steps=2",
