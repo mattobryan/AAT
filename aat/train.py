@@ -156,7 +156,12 @@ def train(cfg):
     model = build_model(cfg["model"], cfg["data"]["dataset"]).to(dev).to(memory_format=torch.channels_last)
     if cfg.get("init_from"):
         sd = torch.load(cfg["init_from"], map_location=dev)
-        model.load_state_dict(sd.get("model", sd))
+        sd = sd.get("model", sd)
+        if model_has_gate(model) and not any(".gamma" in k for k in sd):  # plain pretrain -> gated model
+            from .models import load_plain_into_gated
+            load_plain_into_gated(model, sd)
+        else:
+            model.load_state_dict(sd)
         print(f"initialised from {cfg['init_from']}")
 
     t = cfg["train"]

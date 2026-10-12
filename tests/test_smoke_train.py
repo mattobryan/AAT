@@ -31,3 +31,18 @@ def test_smoke(tmp_path, monkeypatch):
         assert 0 <= res["union"] <= min(res["robust"].values()) <= res["clean"] <= 1
         recs = [json.loads(l) for l in open(os.path.join(out, "log.jsonl"))]
         assert len(recs) == 2 and "eps" in recs[-1]
+
+
+def test_squint_trains_from_a_plain_pretrained_checkpoint(tmp_path, monkeypatch):
+    """The real runs start from the shared l_inf pretrain (init_from), a PLAIN state dict: the gated model must load it."""
+    monkeypatch.setattr(data, "_dataset_cls", lambda name: _fake)
+    from aat.models import build_model
+    ckpt = tmp_path / "plain_pretrain.pt"
+    torch.save({"model": build_model("preactresnet18").state_dict()}, ckpt)
+    cfg = load_config(os.path.join(CFG, "squint_v0.yaml"), [
+        f"out_dir={tmp_path}", f"init_from={ckpt}", "train.epochs=1", "train.batch_size=32", "limit_batches=2",
+        "data.feedback_size=100", "data.num_workers=0", "monitor.every=0", "eval.n=64"])
+    out = train(cfg)
+    assert os.path.exists(os.path.join(out, "final.pt"))
+    rec = json.loads(open(os.path.join(out, "log.jsonl")).readline())
+    assert "gate_acc" in rec

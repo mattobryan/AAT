@@ -193,3 +193,30 @@ def test_gate_attack_modes_force_detach_sttemp_and_restore():
     assert mod.combine(a, b).tolist() == [True, False, False, True]
     assert [v[0] for v in mod.variant_plan(3, (20.0,))] == ["force0", "force1", "force2", "detach", "sttemp20"]
     assert len(mod.variant_plan(0, (20.0,))) == 5  # matched number of extra attacks for a plain model
+
+
+def test_gated_model_initialises_from_a_plain_checkpoint_and_matches_it():
+    from aat.models import GatedBN, build_model, load_plain_into_gated
+    torch.manual_seed(0)
+    plain = build_model("preactresnet18")
+    plain.train()
+    for _ in range(3):  # give the BN running statistics non-trivial values
+        plain(torch.rand(16, 3, 32, 32))
+    with torch.no_grad():
+        for mod in plain.modules():
+            if isinstance(mod, nn.BatchNorm2d):
+                mod.weight.add_(0.2 * torch.randn_like(mod.weight)); mod.bias.add_(0.2 * torch.randn_like(mod.bias))
+    sd = plain.state_dict()
+    gated = build_model("preactresnet18_gated3")
+    load_plain_into_gated(gated, sd)
+    plain.eval(); gated.eval()
+    x = torch.rand(6, 3, 32, 32)
+    with torch.no_grad():  # identical affine rows: the gate cannot change the function at initialisation
+        assert torch.allclose(plain(x), gated(x), atol=1e-4)
+    # a plain checkpoint that does not fit is rejected, not silently half-loaded
+    bad = dict(sd); bad.pop("1.linear.weight")
+    try:
+        load_plain_into_gated(build_model("preactresnet18_gated3"), bad)
+        raise AssertionError("expected a RuntimeError")
+    except RuntimeError:
+        pass

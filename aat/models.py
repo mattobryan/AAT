@@ -158,3 +158,31 @@ def load_weights(model: nn.Module, path: str, map_location="cpu"):
     sd.update({k: v for k, v in own.items() if k.startswith("0.") and k not in sd})  # Normalize buffers
     model.load_state_dict(sd)
     return model
+
+
+_BN_KEY = re.compile(r"^(.*\b(?:bn1|bn2|bn))\.(weight|bias|running_mean|running_var|num_batches_tracked)$")
+
+
+def load_plain_into_gated(model: nn.Module, sd: dict):
+    """Initialise a gated ("squint") model from a plain PreActResNet-18 state dict (the shared l_inf pretrain).
+    Convs and the linear layer map one to one. Every plain BatchNorm becomes a GatedBN: running statistics go to its
+    shared BatchNorm, and weight / bias are copied into every one of the K per-threat affine rows, so at initialisation the
+    gated model computes exactly the plain model's function whatever the gate says. Only the gate head stays random.
+    Raises if anything other than the gate head is left uninitialised."""
+    new = {}
+    for k, v in sd.items():
+        m = _BN_KEY.match(k)
+        if not m:
+            new[k] = v
+            continue
+        base, leaf = m.groups()
+        if leaf in ("weight", "bias"):
+            K = model.state_dict()[base + (".gamma" if leaf == "weight" else ".beta")].shape[0]
+            new[base + (".gamma" if leaf == "weight" else ".beta")] = v.unsqueeze(0).repeat(K, 1)
+        else:
+            new[f"{base}.bn.{leaf}"] = v
+    missing, unexpected = model.load_state_dict(new, strict=False)
+    bad = [k for k in missing if ".gate_" not in k] + list(unexpected)
+    if bad:
+        raise RuntimeError(f"gated init from plain checkpoint left keys unmatched: {bad[:8]}")
+    return model
