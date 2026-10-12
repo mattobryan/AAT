@@ -1,0 +1,8 @@
+# Fixed-budget control at 1.25 x nominal training eps. Together with v3a_max_eps075 and v3a_max this gives the fixed-eps
+# frontier (clean vs union against training eps) that adaptive runs must beat. Evaluation still uses the fixed eval.seen eps.
+base: v3a_max.yaml
+name: v3a_max_eps125
+eps:
+  linf: {nominal: 10/255}
+  l2: {nominal: 0.625}
+  l1: {nominal: 15.0}

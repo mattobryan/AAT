@@ -1,0 +1,9 @@
+# Full AAT with a free budget: classes start at nominal eps and the class-feedback controller may raise or lower eps inside
+# [0.5, 1.5] x nominal with no mean constraint, so the model can train harder than it is tested where it is overfitting.
+# Compare against the fixed-eps frontier (v3a_max_eps075, v3a_max, v3a_max_eps125) and report mean eps per epoch.
+base: aat_full.yaml
+name: aat_full_free
+eps:
+  linf: {init_frac: 1.0, max_frac: 1.5}
+  l2: {init_frac: 1.0, max_frac: 1.5}
+  l1: {init_frac: 1.0, max_frac: 1.5}
