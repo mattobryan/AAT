@@ -143,3 +143,53 @@ def test_plain_model_path_unchanged():
     assert "1.bn.weight" in m.state_dict() and "1.layer1.0.bn1.running_mean" in m.state_dict()
     m.eval()
     assert m(torch.rand(2, 3, 32, 32)).shape == (2, 10) and m[1].last_gate_logits is None
+
+
+def test_gate_attack_modes_force_detach_sttemp_and_restore():
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location("eval_gated_adaptive", os.path.join(os.path.dirname(__file__), "..", "scripts", "eval_gated_adaptive.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    from aat.models import GatedBN, build_model
+    torch.manual_seed(0)
+    m = build_model("preactresnet18_gated3").eval()
+    net = m[1]
+    x = torch.rand(4, 3, 32, 32)
+    gate = lambda: next(mm.g for mm in m.modules() if isinstance(mm, GatedBN))
+    with torch.no_grad():
+        ref = m(x).clone(); free = net.last_gate_logits.clone()
+        with mod.GateAttack(net, "force", 2):
+            m(x)
+            assert torch.allclose(gate()[:, 2], torch.ones(4)) and torch.allclose(gate()[:, :2], torch.zeros(4, 2))
+        with mod.GateAttack(net, "detach", None):  # forward identical to the real model
+            assert torch.allclose(m(x), ref, atol=1e-6)
+        with mod.GateAttack(net, "sttemp", 10.0):  # forward value is the real gate
+            assert torch.allclose(m(x), ref, atol=1e-6)
+        assert torch.allclose(m(x), ref, atol=1e-6) and torch.allclose(net.last_gate_logits, free, atol=1e-6)
+    # gradients: detach cuts the gate path, the real model and the straight-through temperature keep it
+    def gate_grad(mode, arg):
+        xx = x.clone().requires_grad_(True)
+        with mod.GateAttack(net, mode, arg):
+            out = m(xx)
+        return torch.autograd.grad(out.sum(), xx, allow_unused=True)[0]
+    # make the per-threat affines distinct so the gate matters
+    with torch.no_grad():
+        for mm in m.modules():
+            if isinstance(mm, GatedBN):
+                mm.gamma.add_(0.3 * torch.randn_like(mm.gamma)); mm.beta.add_(0.3 * torch.randn_like(mm.beta))
+    xx = x.clone().requires_grad_(True)
+    g_real = torch.autograd.grad(m(xx).sum(), xx)[0]
+    g_det, g_st = gate_grad("detach", None), gate_grad("sttemp", 10.0)
+    assert not torch.allclose(g_det, g_real, atol=1e-7)  # the gate path contributed to the real gradient
+    assert g_st is not None and g_st.abs().sum() > 0 and not torch.allclose(g_st, g_det, atol=1e-7)
+    # hooks are removed even when the attack raises
+    try:
+        with mod.GateAttack(net, "force", 0):
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    with torch.no_grad():
+        assert torch.allclose(m(x), m(x)) and not (net.gate_fc._forward_hooks or any(mm._forward_pre_hooks for mm in m.modules()))
+    a, b = torch.tensor([True, True, False, True]), torch.tensor([True, False, False, True])
+    assert mod.combine(a, b).tolist() == [True, False, False, True]
+    assert [v[0] for v in mod.variant_plan(3, (20.0,))] == ["force0", "force1", "force2", "detach", "sttemp20"]
+    assert len(mod.variant_plan(0, (20.0,))) == 5  # matched number of extra attacks for a plain model

@@ -104,3 +104,12 @@ to reproduce. Page numbers refer to the PDF (page index; the printed page number
     citations of other papers). The text contains no occurrence of "seed" or "standard deviation"; only the RAMP baseline (Table 7.1)
     is stated to be over five runs, so the ablation variants appear to be single runs without variance. Either run CIFAR-100 or drop
     the claim, and report seeds and spread for every variant.
+20. **Evaluation of gated (squint) models (review, 12 Oct 2026).** A CE-trained gate saturates, so routing is almost
+    piecewise constant and plain APGD can miss inputs pushed to a weaker expert. A robust number for a gated model counts only
+    from `scripts/eval_gated_adaptive.py`: standard AutoAttack plus extra APGD-CE attackers (gate forced to each threat,
+    gate gradient cut, straight-through temperature), per-sample AND, scored on the real model. It is an upper bound on true
+    robustness. The comparison model (`v3a_max`) gets the same number of extra APGD-CE runs (seeds 1..N). AutoAttack in
+    `aat.evaluate` is unseeded, so compare `robust` with `robust_standard` from the same `eval_adaptive.json`, never with the
+    number in a different file. Squint has 2 seeds against 3 for the control and n = 1000, so a gap under about 2 pp is
+    descriptive. `gate_acc` in `log.jsonl` is training-batch accuracy under 10-step PGD, not routing under AutoAttack.
+

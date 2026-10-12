@@ -1,6 +1,7 @@
 """Evaluate finished runs that have no eval_autoattack.json yet, one run per GPU, and persist each result.
 
     python scripts/eval_pending.py --runs v3a_max_s0 aat_full_s0 ...
+    python scripts/eval_pending.py --adaptive --runs squint_v0_s0 ...   # gate-aware adaptive attack for gated models
 
 Sits after training in the Kaggle notebook. For every run it restores final.pt and any earlier result from the
 Hugging Face repo, skips runs that already have a result, runs `python -m aat.evaluate --run runs/<run>` (fixed-epsilon
@@ -29,12 +30,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", nargs="+", required=True)
     ap.add_argument("--ngpu", type=int, default=None)
+    ap.add_argument("--adaptive", action="store_true", help="run scripts/eval_gated_adaptive.py (eval_adaptive.json)")
     ap.add_argument("evaluate_args", nargs=argparse.REMAINDER, help="extra args for aat.evaluate, after --")
     a = ap.parse_args()
 
+    result_name = "eval_adaptive.json" if a.adaptive else "eval_autoattack.json"
     todo, missing = [], []
     for r in a.runs:
-        if restore(r, "eval_autoattack.json"):
+        if restore(r, result_name):
             print(f"[skip] {r}: result exists", flush=True)
         elif restore(r, "final.pt"):
             restore(r, "config.yaml")
@@ -55,16 +58,18 @@ def main():
     def one(run):
         g = gpus.get()
         try:
-            log = os.path.join(ROOT, "logs", f"eval_{run}.txt")
+            log = os.path.join(ROOT, "logs", f"eval_{'adaptive_' if a.adaptive else ''}{run}.txt")
             with open(log, "w") as f:
-                rc = subprocess.call([sys.executable, "-m", "aat.evaluate", "--run", os.path.join("runs", run), *extra],
+                cmd = ([sys.executable, "scripts/eval_gated_adaptive.py", "--run", os.path.join("runs", run)] if a.adaptive
+                       else [sys.executable, "-m", "aat.evaluate", "--run", os.path.join("runs", run)])
+                rc = subprocess.call([*cmd, *extra],
                                      cwd=ROOT, env={**os.environ, "CUDA_VISIBLE_DEVICES": str(g)},
                                      stdout=f, stderr=subprocess.STDOUT)
-            res = os.path.join(ROOT, "runs", run, "eval_autoattack.json")
+            res = os.path.join(ROOT, "runs", run, result_name)
             ok = rc == 0 and os.path.exists(res)
             if ok:
-                hub.push(res, f"aat/{run}/eval_autoattack.json")
-                hub.push(log, f"logs/eval_{run}.txt")
+                hub.push(res, f"aat/{run}/{result_name}")
+                hub.push(log, f"logs/eval_{'adaptive_' if a.adaptive else ''}{run}.txt")
             print(f"[{'ok' if ok else 'FAILED'}] {run} on GPU {g} (exit {rc}), log {log}", flush=True)
             return ok
         finally:
