@@ -1,0 +1,9 @@
+# Full AAT at the 1.25 x budget of v3a_max_eps125: nominal training eps scaled by 1.25, classes start at it and the
+# controller only reallocates eps (mean held, inside [0.5, 1.5] x this nominal). Compare with v3a_max_eps125 on the
+# clean-vs-union plane. Evaluation still uses the fixed eval.seen eps (8/255, 0.5, 12).
+base: aat_full.yaml
+name: aat_full_eps125
+eps:
+  linf: {nominal: 10/255, init_frac: 1.0, max_frac: 1.5, mean_preserve: true}
+  l2: {nominal: 0.625, init_frac: 1.0, max_frac: 1.5, mean_preserve: true}
+  l1: {nominal: 15.0, init_frac: 1.0, max_frac: 1.5, mean_preserve: true}

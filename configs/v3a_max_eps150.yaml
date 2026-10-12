@@ -1,0 +1,8 @@
+# Fixed-budget control at 1.5 x nominal training eps: extends the fixed-eps frontier (0.75, 1.0, 1.25 x) to the right.
+# Evaluation still uses the fixed eval.seen eps.
+base: v3a_max.yaml
+name: v3a_max_eps150
+eps:
+  linf: {nominal: 12/255}
+  l2: {nominal: 0.75}
+  l1: {nominal: 18.0}
