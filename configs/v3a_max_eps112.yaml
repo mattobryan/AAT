@@ -1,0 +1,8 @@
+# Fixed-budget control at 1.125 x nominal training eps: pins the clean-vs-union frontier near clean 81, where aat_full_eps125
+# (mean eps held at 1.25 x, clean 81.1) is compared. Evaluation still uses the fixed eval.seen eps.
+base: v3a_max.yaml
+name: v3a_max_eps112
+eps:
+  linf: {nominal: 9/255}
+  l2: {nominal: 0.5625}
+  l1: {nominal: 13.5}

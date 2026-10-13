@@ -1,0 +1,10 @@
+# Per-norm budget reallocation (static). In the fixed-eps runs linf and l2 robustness barely move with training eps
+# (linf 47->48, l2 64->62 from 1.25x to 1.5x) while l1 robustness, which sets the union, gains 5 points per 0.25x.
+# This moves training budget from l2 to l1: linf 1.0x, l2 0.75x, l1 1.5x. Evaluation still uses the fixed eval.seen eps.
+# Compare on the clean-vs-union plane against the fixed-eps frontier, not at equal nominal eps.
+base: v3a_max.yaml
+name: v3a_max_realloc
+eps:
+  linf: {nominal: 8/255}
+  l2: {nominal: 0.375}
+  l1: {nominal: 18.0}
