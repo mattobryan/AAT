@@ -1,3 +1,4 @@
+import pytest
 import torch
 import torch.nn as nn
 
@@ -220,3 +221,21 @@ def test_gated_model_initialises_from_a_plain_checkpoint_and_matches_it():
         raise AssertionError("expected a RuntimeError")
     except RuntimeError:
         pass
+
+
+def test_strong_eval_extras_run_on_survivors_only():
+    """scripts/eval_strong.py: extra attacks run on the points that survived APGD-CE + APGD-T, the full-suite mask is a
+    subset of the standard mask, and a tiny budget removes nothing."""
+    import os
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    pytest.importorskip("autoattack")
+    from eval_strong import strong_norm
+    torch.manual_seed(0)
+    model = nn.Sequential(nn.Flatten(), nn.Linear(3 * 32 * 32, 10)).eval()
+    x = torch.rand(4, 3, 32, 32)
+    with torch.no_grad():
+        y = model(x).argmax(1)
+    clean = torch.ones(4, dtype=torch.bool)
+    m_std, m, drops = strong_norm(model, x, y, clean, "linf", 1e-6, bs=4, dev="cpu")
+    assert m_std.all() and m.all() and drops == {"fab-t": 0, "square": 0}

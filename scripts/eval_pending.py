@@ -31,10 +31,13 @@ def main():
     ap.add_argument("--runs", nargs="+", required=True)
     ap.add_argument("--ngpu", type=int, default=None)
     ap.add_argument("--adaptive", action="store_true", help="run scripts/eval_gated_adaptive.py (eval_adaptive.json)")
+    ap.add_argument("--strong", action="store_true", help="run scripts/eval_strong.py, full AutoAttack suite (eval_strong.json)")
     ap.add_argument("evaluate_args", nargs=argparse.REMAINDER, help="extra args for aat.evaluate, after --")
     a = ap.parse_args()
 
-    result_name = "eval_adaptive.json" if a.adaptive else "eval_autoattack.json"
+    kind = "strong" if a.strong else "adaptive" if a.adaptive else None
+    result_name = f"eval_{kind}.json" if kind else "eval_autoattack.json"
+    script = {"strong": "scripts/eval_strong.py", "adaptive": "scripts/eval_gated_adaptive.py"}.get(kind)
     todo, missing = [], []
     for r in a.runs:
         if restore(r, result_name):
@@ -58,9 +61,9 @@ def main():
     def one(run):
         g = gpus.get()
         try:
-            log = os.path.join(ROOT, "logs", f"eval_{'adaptive_' if a.adaptive else ''}{run}.txt")
+            log = os.path.join(ROOT, "logs", f"eval_{kind + '_' if kind else ''}{run}.txt")
             with open(log, "w") as f:
-                cmd = ([sys.executable, "scripts/eval_gated_adaptive.py", "--run", os.path.join("runs", run)] if a.adaptive
+                cmd = ([sys.executable, script, "--run", os.path.join("runs", run)] if script
                        else [sys.executable, "-m", "aat.evaluate", "--run", os.path.join("runs", run)])
                 rc = subprocess.call([*cmd, *extra],
                                      cwd=ROOT, env={**os.environ, "CUDA_VISIBLE_DEVICES": str(g)},
@@ -69,7 +72,7 @@ def main():
             ok = rc == 0 and os.path.exists(res)
             if ok:
                 hub.push(res, f"aat/{run}/{result_name}")
-                hub.push(log, f"logs/eval_{'adaptive_' if a.adaptive else ''}{run}.txt")
+                hub.push(log, f"logs/eval_{kind + '_' if kind else ''}{run}.txt")
             print(f"[{'ok' if ok else 'FAILED'}] {run} on GPU {g} (exit {rc}), log {log}", flush=True)
             return ok
         finally:
