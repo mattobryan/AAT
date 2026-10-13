@@ -1,0 +1,9 @@
+# Dose-response arm for v3a_max_realloc: linf 1.0x, l2 0.5x, l1 1.75x. If realloc beats the fixed-eps frontier, this shows whether
+# pushing budget further from l2 to l1 keeps helping or l2 robustness starts to drag the union down.
+# Evaluation still uses the fixed eval.seen eps.
+base: v3a_max.yaml
+name: v3a_max_realloc_b
+eps:
+  linf: {nominal: 8/255}
+  l2: {nominal: 0.25}
+  l1: {nominal: 21.0}
