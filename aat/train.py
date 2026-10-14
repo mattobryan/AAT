@@ -93,7 +93,7 @@ def run_feedback(model, loader, eps_s, cfg, dev, C):
         m, ys = robust_masks(model, loader, p, lambda y: torch.full_like(y, eps_s.nominal[p], dtype=torch.float32),
                              steps, cfg, dev)
         fb["nominal"][p], fb["class_nominal"][p] = m.float().mean().item(), per_class(m, ys, C)
-        if eps_s.mode(p) in ("norm_feedback", "class_feedback"):
+        if eps_s.mode(p) == "class_feedback":
             ce = eps_s.class_eps(p)
             m, ys = robust_masks(model, loader, p, lambda y: ce[y], steps, cfg, dev)
         fb["current"][p], fb["class_current"][p] = m.float().mean().item(), per_class(m, ys, C)

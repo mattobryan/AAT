@@ -239,3 +239,50 @@ def test_strong_eval_extras_run_on_survivors_only():
     clean = torch.ones(4, dtype=torch.bool)
     m_std, m, drops = strong_norm(model, x, y, clean, "linf", 1e-6, bs=4, dev="cpu")
     assert m_std.all() and m.all() and drops == {"fab-t": 0, "square": 0}
+
+
+def _normctl_cfg(init=(1.0, 1.0, 1.0), alpha=0.5, mean_frac=1.0833):
+    cfg = {"norm_ctl": {"alpha": alpha, "mean_frac": mean_frac}}
+    for p, nom, f in zip(["linf", "l2", "l1"], [8 / 255, 0.5, 12.0], init):
+        cfg[p] = {"nominal": nom, "mode": "norm_feedback", "init_frac": f, "min_frac": 0.25, "max_frac": 2.0}
+    return cfg
+
+
+def test_norm_feedback_weakest_norm_gains_strongest_loses():
+    norms = ["linf", "l2", "l1"]
+    s = EpsScheduler(_normctl_cfg(), norms, 10, 10, "cpu")
+    s.update(_fb(norms, [0.45, 0.65, 0.30]))  # l1 weakest, l2 strongest
+    assert s.frac["l1"] > s.frac["linf"] > s.frac["l2"]
+    assert float(s.class_eps("l1").mean()) == pytest.approx(s.frac["l1"] * 12.0)
+    summ = s.summary()
+    assert summ["l1"]["frac"] == s.frac["l1"] and summ["l1"]["acc_nominal"] == pytest.approx(0.30)
+
+
+def test_norm_feedback_keeps_mean_fraction_and_bounds():
+    norms = ["linf", "l2", "l1"]
+    s = EpsScheduler(_normctl_cfg(init=(1.0, 0.75, 1.5), alpha=0.9), norms, 10, 10, "cpu")
+    for acc in ([0.9, 0.1, 0.5], [0.1, 0.9, 0.2], [0.5, 0.5, 0.0]) * 20:
+        s.update(_fb(norms, list(acc)))
+        f = torch.tensor([s.frac[p] for p in norms])
+        assert abs(float(f.mean()) - 1.0833) < 1e-6
+        assert float(f.min()) >= 0.25 - 1e-9 and float(f.max()) <= 2.0 + 1e-9
+
+
+def test_norm_feedback_equal_accuracy_is_stationary():
+    norms = ["linf", "l2", "l1"]
+    s = EpsScheduler(_normctl_cfg(init=(1.0, 0.75, 1.5), mean_frac=(1.0 + 0.75 + 1.5) / 3), norms, 10, 10, "cpu")
+    for _ in range(5):
+        s.update(_fb(norms, [0.4, 0.4, 0.4]))
+    assert [s.frac[p] for p in norms] == pytest.approx([1.0, 0.75, 1.5])
+
+
+def test_static_scheduler_unchanged_by_norm_feedback_code():
+    norms = ["linf", "l2", "l1"]
+    cfg = {p: {"nominal": n, "mode": "static"} for p, n in zip(norms, [8 / 255, 0.5, 12.0])}
+    cfg["norm_ctl"] = {"alpha": 0.5, "mean_frac": 2.0}  # ignored when no norm uses norm_feedback
+    s = EpsScheduler(cfg, norms, 10, 10, "cpu")
+    s.update(_fb(norms, [0.9, 0.1, 0.5]))
+    assert s.ctl_norms == []
+    for p, n in zip(norms, [8 / 255, 0.5, 12.0]):
+        assert torch.allclose(s.class_eps(p), torch.full((10,), n))
+        assert set(s.summary()[p]) == {"mean", "min", "max", "zero_budget_classes"}

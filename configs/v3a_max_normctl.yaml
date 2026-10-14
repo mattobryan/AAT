@@ -1,0 +1,12 @@
+# Norm-level eps controller on top of 3A/MAX. One fraction f_p per norm, updated after every feedback pass:
+#   f_p <- f_p + alpha * (mean_q A_q - A_p), clip to [min_frac, max_frac], project so mean_p f_p == mean_frac,
+# with A_p the robust accuracy at the NOMINAL eps (feedback.nominal). The weakest norm gets more eps.
+# eps.norm_ctl holds the norm-independent keys (alpha, mean_frac); init/min/max_frac are per norm.
+# mean_frac 1.0833 = mean(1.0, 0.75, 1.5), the budget of v3a_max_realloc. Evaluation still uses the fixed eval.seen eps.
+base: v3a_max.yaml
+name: v3a_max_normctl
+eps:
+  norm_ctl: {alpha: 0.5, mean_frac: 1.0833}
+  linf: {mode: norm_feedback, init_frac: 1.0, min_frac: 0.25, max_frac: 2.0}
+  l2: {mode: norm_feedback, init_frac: 1.0, min_frac: 0.25, max_frac: 2.0}
+  l1: {mode: norm_feedback, init_frac: 1.0, min_frac: 0.25, max_frac: 2.0}

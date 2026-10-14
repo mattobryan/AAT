@@ -1,0 +1,9 @@
+# As v3a_max_normctl but started at the static reallocation (linf 1.0x, l2 0.75x, l1 1.5x) with a gentler alpha,
+# so the controller only fine-tunes around v3a_max_realloc. Evaluation still uses the fixed eval.seen eps.
+base: v3a_max_normctl.yaml
+name: v3a_max_normctl_ft
+eps:
+  norm_ctl: {alpha: 0.25}
+  linf: {init_frac: 1.0}
+  l2: {init_frac: 0.75}
+  l1: {init_frac: 1.5}

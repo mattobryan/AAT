@@ -35,7 +35,10 @@ class EpsScheduler:
     modes (per norm, `cfg["eps"][norm]["mode"]`):
       static          eps = nominal                                                  (RAMP, 3A)
       linear          global ramp from start_frac*nominal to nominal over ramp_epochs (1A)
-      norm_feedback   global eps_p <- Proj(eps_p + alpha*(R_p - tau)*nominal)      (Eq. 4.18)
+      norm_feedback   norm-level, budget-neutral across the norms in this mode: one fraction f_p per norm,
+                      f_p <- Proj(f_p + alpha*(mean_q A_q - A_p)), eps_p = f_p*nominal_p, A_p = robust acc
+                      at the NOMINAL eps (fb["nominal"]); weakest norm gains eps. alpha and mean_frac are
+                      read from `cfg["norm_ctl"]`, bounds/init per norm (replaces the unused Eq. 4.18 form)
       class_feedback  per-class eps_c <- Proj(eps_c + alpha*(A_c - tau)*nominal)   (Eq. 4.19)
       sample          per-sample eps from gradient-norm + class-robustness difficulty (Eq. A.1)
       class_index     literal thesis Eq. A.5: nominal*(1+0.05*y)*min(1, t/T); kept only for
@@ -52,6 +55,9 @@ class EpsScheduler:
             self.state[p] = torch.full((num_classes,), init, device=device)
         self.class_rob_ema = {p: torch.full((num_classes,), 0.5, device=device) for p in norms}
         self.epoch = 0
+        self.ctl_norms = [p for p in norms if self.mode(p) == "norm_feedback"]
+        self.frac = {p: float(cfg[p].get("init_frac", 1.0)) for p in self.ctl_norms}  # norm-level fractions
+        self.ctl_acc = {}  # last nominal-eps robust acc seen by the norm-level controller
 
     def bounds(self, p):
         c = self.cfg[p]
@@ -63,14 +69,28 @@ class EpsScheduler:
     def set_epoch(self, epoch):
         self.epoch = epoch
 
+    def _update_norm_feedback(self, fb):
+        """f_p <- f_p + alpha*(mean_q A_q - A_p), clip to [min_frac, max_frac], project to mean(f) = mean_frac."""
+        ps = self.ctl_norms
+        ctl = self.cfg.get("norm_ctl", {})
+        alpha, mean_frac = float(ctl.get("alpha", 0.5)), float(ctl.get("mean_frac", 1.0))
+        A = torch.tensor([float(fb["nominal"][p]) for p in ps], dtype=torch.float64)
+        f = torch.tensor([self.frac[p] for p in ps], dtype=torch.float64)
+        lo = torch.tensor([self.cfg[p].get("min_frac", 0.25) for p in ps], dtype=torch.float64)
+        hi = torch.tensor([self.cfg[p].get("max_frac", 2.0) for p in ps], dtype=torch.float64)
+        f = project_mean((f + alpha * (A.mean() - A)).clamp(lo, hi), mean_frac, lo, hi)
+        for p, fp, ap in zip(ps, f.tolist(), A.tolist()):
+            self.frac[p], self.ctl_acc[p] = fp, ap
+            self.state[p] = torch.full((self.C,), fp * self.nominal[p], device=self.device)
+
     def update(self, fb):
+        if self.ctl_norms:
+            self._update_norm_feedback(fb)
         for p in self.norms:
             c, m = self.cfg[p], self.mode(p)
             lo, hi = self.bounds(p)
             alpha, tau = c.get("alpha", 0.05), c.get("tau", 0.5)
-            if m == "norm_feedback":
-                self.state[p] = (self.state[p] + alpha * (fb["current"][p] - tau) * self.nominal[p]).clamp(lo, hi)
-            elif m == "class_feedback":
+            if m == "class_feedback":
                 a = fb["class_current"][p].to(self.device)
                 self.state[p] = (self.state[p] + alpha * (a - tau) * self.nominal[p]).clamp(lo, hi)
                 if c.get("mean_preserve"):  # budget-neutral: reallocate eps across classes, keep the mean fixed
@@ -121,9 +141,14 @@ class EpsScheduler:
         return int((self.class_eps(p) <= lo * 1.0001).sum().item())
 
     def summary(self):
-        return {p: {"mean": float(self.class_eps(p).mean()), "min": float(self.class_eps(p).min()),
-                    "max": float(self.class_eps(p).max()),
-                    "zero_budget_classes": self.zero_budget_classes(p)} for p in self.norms}
+        out = {p: {"mean": float(self.class_eps(p).mean()), "min": float(self.class_eps(p).min()),
+                   "max": float(self.class_eps(p).max()),
+                   "zero_budget_classes": self.zero_budget_classes(p)} for p in self.norms}
+        for p in self.ctl_norms:  # norm-level controller: fraction f_p and the nominal-eps accuracy A_p behind it
+            out[p]["frac"] = self.frac[p]
+            if p in self.ctl_acc:
+                out[p]["acc_nominal"] = self.ctl_acc[p]
+        return out
 
 
 # --------------------------------------------------------------------------- norms
