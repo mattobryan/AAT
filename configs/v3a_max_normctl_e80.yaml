@@ -1,0 +1,6 @@
+# 80-epoch from-scratch version of v3a_max_normctl (RAMP's schedule length; no shared pretrain). Everything else is inherited unchanged.
+base: v3a_max_normctl.yaml
+name: v3a_max_normctl_e80
+init_from: null
+train: {epochs: 80}
+monitor: {every: 10}

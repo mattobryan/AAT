@@ -1,0 +1,6 @@
+# 80-epoch from-scratch version of v3a_max (RAMP's schedule length; no shared pretrain). Everything else is inherited unchanged.
+base: v3a_max.yaml
+name: v3a_max_e80
+init_from: null
+train: {epochs: 80}
+monitor: {every: 10}
