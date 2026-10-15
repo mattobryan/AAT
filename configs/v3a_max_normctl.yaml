@@ -7,6 +7,6 @@ base: v3a_max.yaml
 name: v3a_max_normctl
 eps:
   norm_ctl: {alpha: 0.5, mean_frac: 1.0833}
-  linf: {mode: norm_feedback, init_frac: 1.0, min_frac: 0.25, max_frac: 2.0}
-  l2: {mode: norm_feedback, init_frac: 1.0, min_frac: 0.25, max_frac: 2.0}
-  l1: {mode: norm_feedback, init_frac: 1.0, min_frac: 0.25, max_frac: 2.0}
+  linf: {mode: norm_feedback, init_frac: 1.0, min_frac: 0.5, max_frac: 2.0}
+  l2: {mode: norm_feedback, init_frac: 1.0, min_frac: 0.5, max_frac: 2.0}
+  l1: {mode: norm_feedback, init_frac: 1.0, min_frac: 0.5, max_frac: 2.0}
