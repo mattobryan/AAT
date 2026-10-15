@@ -1,0 +1,196 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs,amsmath,amssymb,hyperref}
+\usepackage[font=small]{caption}
+\newcommand{\linf}{\ell_\infty}
+\title{Adaptive adversarial training under a clean protocol:\\
+what survives the audit, and what a per-norm budget does\\
+\large A CIFAR-10 / PreActResNet-18 study, from the first RAMP reproduction to the norm-level controller}
+\author{Matoke Brian\\\small Status report, 15 October 2026. Draft pending reviewer sign-off.}
+\date{}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The starting point is an MSc thesis on Adaptive Adversarial Training (AAT) that scheduled the perturbation budget $\varepsilon$ and the
+attacked norm from feedback. An audit of that thesis found contradictory tables and, above all, evaluation at the adaptive $\varepsilon$.
+We re-test the idea on CIFAR-10 with a PreActResNet-18 under one protocol: AutoAttack's APGD-CE and APGD-T at \emph{fixed}
+$\varepsilon=(8/255,\,0.5,\,12)$ for $\ell_\infty,\ell_2,\ell_1$ on the first 1000 test images, with union robustness as the per-sample AND over the three norms.
+Four findings. (1)~On the official RAMP code, per-class budget and sample reallocation did not raise union robustness or the weakest classes.
+(2)~In our own 10-epoch fine-tuning pipeline, union robustness is governed by the \emph{total training budget}; a method is only credited if it
+beats the fixed-$\varepsilon$ clean-versus-union frontier at matched clean accuracy. The thesis-style adaptive variants sit about 1 to 2 points above that frontier, but an E-AT-style non-adaptive baseline sits 3.3 above it, so that gap is not attributable to adaptivity.
+(3)~Reallocating a roughly fixed total budget \emph{across norms} (less on $\ell_2$, more on $\ell_1$; mean fraction $1.08\times$) lifts union robustness by about 6 points above the
+frontier at matched clean accuracy (41.8 versus 35.7), and loses at most 0.3 points to extra attack seeds and to the full AutoAttack suite (seed 0 only). The ratio was chosen on test-set results and still needs confirmation on held-out images. Union tracks $\min(\ell_\infty,\ell_1)$ and $\ell_2$ is slack.
+The effect may partly compensate for a weak $\ell_1$ training attack in our pipeline, which is untested. (4)~An input-conditioned gated network (``squint'') is a null result.
+A norm-level $\varepsilon$ controller that is intended to find the allocation automatically is implemented and unit-tested but has not trained on real data.
+\end{abstract}
+
+\section{Question and starting point}
+The thesis proposed adaptive scheduling of the training budget (per sample or per class) and of the sampled norm, combined with a hybrid loss and
+KL pairing (``full AAT''). Its headline claims were never reproducible from its own tables: three different union numbers for one model, two RAMP baselines,
+swapped variant labels, a robust accuracy above clean accuracy, and, most importantly, strategies that evaluated each sample at its own adaptive $\varepsilon$.
+Evaluating at a smaller $\varepsilon$ for vulnerable samples inflates robust accuracy and is not comparable to fixed-$\varepsilon$ baselines.
+The audit (\texttt{docs/thesis\_audit.md}, 20 items) therefore turns every thesis number into a hypothesis to re-test. The README states four:
+H1, full AAT beats fixed-schedule multi-norm AT on union robustness (gain above twice the seed standard deviation, clean drop at most 1 point);
+H2, class-feedback $\varepsilon$ narrows the class robustness gap; H3, adaptive norm sampling beats cyclic sampling; H4, AAT generalises better to unseen threats.
+
+\section{Protocol}
+\textbf{Model and data.} PreActResNet-18, CIFAR-10, pixels in $[0,1]$ with normalisation inside the model.
+\textbf{Evaluation (never changed).} AutoAttack \texttt{standard} restricted to APGD-CE and APGD-T (the same two attacks as the official RAMP \texttt{eval.py}), fixed $\varepsilon$ for every
+model, first 1000 test images, union $=$ per-sample AND over $\ell_\infty,\ell_2,\ell_1$. The unseen-threat grid (three further budgets per norm) uses APGD-CE only.
+These numbers are \emph{not} comparable to full-suite AutoAttack leaderboard numbers. Two follow-up checks are described in Section~\ref{sec:masking}.
+\textbf{Training attacks.} In our own pipeline: PGD with 5, 5 and 10 steps for $\ell_\infty,\ell_2,\ell_1$ (the $\ell_1$ attack is SLIDE-style, sparsity 0.95), max aggregation across norms.
+The official RAMP code uses 10-step APGD training attacks for $\ell_\infty$ and $\ell_1$ only, KL pairing ($\lambda=5$), gradient-projection fusion with a per-epoch clean model, learning rate 0.05, softplus activation, and 80 epochs from scratch.
+\textbf{Two pipelines.} \emph{Official RAMP} runs (80 epochs from scratch, 790 to 860\,s per epoch on a T4) form the locked baseline and the first set of experiments.
+\emph{Our pipeline} fine-tunes for 10 epochs (250 to 295\,s per epoch) from one shared 30-epoch $\ell_\infty$ pretrain, so a run costs about 45 minutes of training plus about 25 minutes of evaluation, and a pair fits on the two T4s.
+\textbf{The budget confound and the frontier control.} In our pipeline the training $\varepsilon$ moves union robustness by about 21 points
+(Table~\ref{tab:frontier}), so a method that silently trains with a larger total budget looks better and loses clean accuracy.
+Every adaptive run is therefore compared with the fixed-$\varepsilon$ curve (clean versus union) at matched clean accuracy, using five fixed-budget runs from $0.75\times$ to $1.5\times$ nominal.
+The frontier is a piecewise-linear chord through those points. The node slopes ($-1.3,-2.1,-1.9,-2.7$ points of union per point of clean) are not monotone, so the chord may over- or understate the true curve between nodes, and gaps below about 1 to 2 points are not resolved. It is also specific to the \texttt{v3a\_max} recipe: non-adaptive recipes land up to 3 points off it (Table~\ref{tab:frontier}). Means are shown to one decimal; where an exact mean ends in .x5 the last digit may differ by 0.1 from other documents.
+\textbf{Statistics.} Two or three seeds per arm, $n=1000$ images (binomial standard error about 1.6 points on union, about 5 per class). Differences are descriptive, not tested.
+
+\section{Phase 1: the official RAMP baseline and per-class reallocation}
+The official RAMP code (commit \texttt{be4971f}) reproduces thesis Table~7.1 within 1 point on every metric (two seeds). On top of it we ran a budget-neutral
+per-class, per-norm $\varepsilon$ controller in two directions (\texttt{aat\_rel}: classes with higher training robustness get more $\varepsilon$;
+\texttt{aat\_flip}: the reverse), a class-sampling fine-tune from the locked epoch-80 weights (feedback-weighted sampler versus uniform control), and uniform averaging of the epoch 60/70/80 weights.
+
+\begin{table}[h]\centering\small
+\caption{Official RAMP and class-level reallocation (locked evaluation JSONs, 2-seed means, \%). Worst class is the lowest per-class union.}\label{tab:ramp}
+\begin{tabular}{lrrrrrrr}\toprule
+Run & Clean & $\ell_\infty$ & $\ell_2$ & $\ell_1$ & Union & Worst class & Union per seed\\\midrule
+RAMP (locked baseline) & 81.3 & 45.7 & 66.4 & 48.4 & 44.4 & 12.8 & 45.7, 43.1\\
+\texttt{aat\_rel}      & 82.9 & 45.8 & 66.9 & 48.6 & 44.7 & 10.8 & 45.2, 44.1\\
+\texttt{aat\_flip}     & 78.2 & 41.4 & 64.2 & 45.4 & 40.2 & 7.2  & 42.0, 38.3\\
+control (uniform sampler) & 82.5 & 45.0 & 65.4 & 48.5 & 43.5 & 12.8 & 43.6, 43.3\\
+feedback sampler        & 82.7 & 45.7 & 65.8 & 48.6 & 44.6 & 13.3 & 45.2, 43.9\\\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Findings.} Neither reallocation direction raised union robustness; reversing the allocation lowered it in both seeds, and worst-class union fell in both arms, which does not support H2.
+The sampler and the control are within noise of each other and of locked epoch 80. Union is within 2.5 points of $\min(\ell_\infty,\ell_1)$ in every class (2-seed mean; up to 4.4 per seed) and within 1.3 points overall:
+the weak classes (cat, deer, dog, bird) are weak under every norm, so aligning norms has little headroom for RAMP's weights.
+Checkpoint averaging lowered worst-class union in both seeds (13.3 to 10.7 and 12.2 to 9.7) and changed union by $-1.3$ and $+2.8$.
+On the first 1000 train and test images, union on the weak four classes is 32.8 on train and 20.8 on test (gap 12.0), against 69.5 and 58.9 for the other six (gap 10.5); their clean accuracy on training images is 79.1 against 95.3.
+The weak classes are therefore also poorly fit on data the model saw, which is consistent with an optimisation- or capacity-limited explanation but does not exclude a data-limited one, and two seeds with about 100 images per class cannot separate them.
+
+\section{Phase 2: our pipeline, fixed baselines and the thesis variants}
+Table~\ref{tab:frontier} gives the fixed-schedule runs, and Table~\ref{tab:aat} the adaptive thesis-style variants against the frontier built from them.
+
+\begin{table}[h]\centering\small
+\caption{Fixed-$\varepsilon$ training budgets in our pipeline (means over seeds, \%). Fraction is the multiple of the nominal training budget.}\label{tab:frontier}
+\begin{tabular}{lrrrrrrr}\toprule
+Run & Seeds & Clean & $\ell_\infty$ & $\ell_2$ & $\ell_1$ & Union & Worst class\\\midrule
+fixed $0.75\times$ & 3 & 85.9 & 42.3 & 66.7 & 21.3 & 21.1 & 3.1\\
+fixed $1.0\times$ (\texttt{v3a\_max}) & 3 & 82.9 & 44.6 & 66.2 & 29.9 & 29.3 & 4.2\\
+fixed $1.125\times$ & 2 & 81.0 & 45.3 & 65.3 & 33.5 & 32.7 & 5.1\\
+fixed $1.25\times$ & 2 & 79.0 & 47.0 & 64.1 & 37.7 & 36.8 & 5.7\\
+fixed $1.5\times$ & 2 & 75.0 & 48.4 & 62.4 & 43.3 & 42.1 & 5.8\\\midrule
+RAMP-style fine-tune (\texttt{ramp}) & 3 & 82.1 & 45.4 & 65.6 & 30.0 & 29.7 & 5.7\\
+E-AT-style fine-tune (\texttt{eat}) & 3 & 83.4 & 43.3 & 66.7 & 32.6 & 31.2 & 7.4\\\bottomrule
+\end{tabular}
+\end{table}
+
+Two observations. First, union rises from 21.1 to 42.1 as the budget goes from $0.75\times$ to $1.5\times$ while clean accuracy falls from 85.9 to 75.0: the budget confound is large, and any comparison without matching is uninformative.
+Second, our RAMP-style fine-tune reaches only 29.7 union against 44.4 for official RAMP, and its $\ell_1$ robustness at the nominal budget is about 30 against 48.4. We suspect the $\ell_1$ component of our training attack (10-step SLIDE) is weaker than RAMP's APGD $\ell_1$ attack, but this is untested: the pipelines also differ in schedule length, initialisation, activation, KL pairing and gradient projection. $\ell_1$ is where our models are weakest.
+
+\begin{table}[h]\centering\small
+\caption{Adaptive thesis-style variants against the fixed frontier (\%). ``Gap'' is union minus the chord of the five fixed runs at that run's clean accuracy; \texttt{aat\_full} (86.9) lies beyond the highest node (85.9), so no gap is defined.}\label{tab:aat}
+\begin{tabular}{lrrrrrr}\toprule
+Run & Seeds & Clean & Union & Worst class & Frontier at this clean & Gap\\\midrule
+full AAT (\texttt{aat\_full}) & 3 & 86.9 & 22.7 & 2.9 & out of range & ---\\
+full AAT, mean $\varepsilon$ held at nominal & 3 & 83.7 & 28.2 & 4.4 & 27.0 & $+1.2$\\
+full AAT, free per-class $\varepsilon$ & 2 & 83.6 & 28.6 & 4.4 & 27.3 & $+1.3$\\
+full AAT at $1.25\times$ & 2 & 81.1 & 34.5 & 6.1 & 32.6 & $+1.9$\\
+full AAT without $\ell_2$ & 1 & 85.8 & 24.2 & 3.3 & 21.3 & $+2.9$\\
+class-$\varepsilon$ only (\texttt{v3b\_classeps}) & 1 & 85.8 & 24.4 & 4.4 & 21.3 & $+3.1$\\
+class-$\varepsilon$ only, nominal & 1 & 83.1 & 29.3 & 5.6 & 28.7 & $+0.6$\\\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Findings.} Raw, full AAT looks like a trade of 6.6 points of union (22.7 versus 29.3) for 4.0 points of clean accuracy against \texttt{v3a\_max}; that is the budget, not the method.
+Against the frontier the adaptive variants whose clean accuracy lies within the node range sit $+0.6$ to $+3.1$ above it, most at $+1.2$ to $+1.9$. The E-AT-style fixed baseline sits $+3.3$ above the same chord (31.2 against 27.9) and the RAMP-style baseline $-1.0$, so the frontier describes only the \texttt{v3a\_max} recipe and non-adaptive recipes move $\pm3$ points off it. The cleanest single comparison is full AAT at $1.25\times$ against the fixed $1.125\times$ run, which has almost identical clean accuracy
+(81.1 versus 81.0): union 34.5 (seeds 34.4, 34.6) versus 32.7 (seeds 32.9, 32.5), a gap of 1.8 with non-overlapping seed ranges and $n=2$.
+That is suggestive and in the right direction for H1, but it is a gap of the same order as the chord error and the seed spread of the control (union range 28.7 to 30.0 over three seeds for \texttt{v3a\_max}),
+and the README criterion is defined against \texttt{v3a\_max}, \texttt{ramp} and \texttt{eat}: against those, every full-AAT variant fails either the union test or the clean-drop test (a two-seed standard deviation is not a usable noise estimate). The worst class does not improve, and E-AT, a README comparator, has a larger gap than any adaptive variant.
+Class-$\varepsilon$ feedback alone (H2) shows no gain in the worst class (4.4 against a 3-seed mean of 4.2 for \texttt{v3a\_max}, whose per-seed values range from 2.2 to 5.8, and 5.6 for the nominal-budget variant, one seed each: no resolvable gain). The held-out-norm test (H4) is flat: with $\ell_2$ never trained on,
+$\ell_2$ accuracy is 66.4 against 65.6 to 66.7 for the trained alternatives, consistent with $\ell_\infty$ training already covering $\ell_2$ at 0.5. H3 (adaptive versus cyclic norm sampling) was not run.
+
+\section{Phase 3: squint, an input-conditioned network}
+Squint reads the perturbation it is given: a gate head routes through gated BatchNorm experts, with a no-gate ablation. Gated models need a stronger evaluation, because a saturated gate can hide gradients;
+we score them with the standard attacks plus extra APGD-CE attackers (gate forced to each threat, gate gradient cut, a temperature variant), per-sample AND, which is an upper bound on true robustness.
+Against \texttt{v3a\_max} given the same number of extra attack seeds (adaptive union 28.2 and 27.4 on two seeds): squint 29.6 (clean 82.1) and the no-gate ablation 28.7 (clean 82.6). Against the chord of Table~\ref{tab:frontier} (computed from the standard two-attack results) they sit $1.1$ and $0.6$ points below the fixed frontier (one seed each).
+We record squint as a null result. Its gate also does not route cleanly: the clean-input gate puts 0.6\% of inputs on the first expert and the $\ell_1$-adversarial gate 50\%, so the attacker moves the routing, which is consistent with the gate being a weak defence.
+
+\section{Phase 4: reallocating the budget across norms}\label{sec:realloc}
+Union tracks $\min(\ell_\infty,\ell_1)$ in all of our runs, and $\ell_2$ is slack: it stays between 62 and 67 whatever its training budget. At the fixed nominal budget $\ell_1$ is the binding norm (about 30 against 45 for $\ell_\infty$), so a fixed total budget spent on $\ell_2$ is largely wasted.
+We therefore tested a static reallocation holding $\ell_\infty$ at $1.0\times$: $\ell_2$ $0.75\times$ and $\ell_1$ $1.5\times$ (\texttt{realloc}), and a more extreme version with $\ell_2$ $0.5\times$ and $\ell_1$ $1.75\times$ (\texttt{realloc\_b}).
+
+\begin{table}[h]\centering\small
+\caption{Per-norm reallocation against the frontier (2-seed means, \%). Official RAMP is the 80-epoch from-scratch result, shown for reference only.}\label{tab:realloc}
+\begin{tabular}{lrrrrrrr}\toprule
+Run & Clean & $\ell_\infty$ & $\ell_2$ & $\ell_1$ & Union & Union per seed & Gap\\\midrule
+fixed $1.125\times$ & 81.0 & 45.3 & 65.3 & 33.5 & 32.7 & 32.9, 32.5 & node\\
+\texttt{realloc} ($1.0/0.75/1.5\times$) & 79.6 & 42.5 & 65.5 & 50.0 & 41.8 & 41.7, 42.0 & $+6.2$\\
+\texttt{realloc\_b} ($1.0/0.5/1.75\times$) & 78.2 & 41.0 & 64.4 & 54.9 & 41.0 & 41.1, 40.8 & $+3.1$\\
+fixed $1.5\times$ & 75.0 & 48.4 & 62.4 & 43.3 & 42.1 & 42.2, 42.0 & node\\
+official RAMP (80 epochs) & 81.3 & 45.7 & 66.4 & 48.4 & 44.4 & 45.7, 43.1 & ---\\\bottomrule
+\end{tabular}
+\end{table}
+
+At clean accuracy 79.6 the frontier predicts 35.7 union and \texttt{realloc} reaches 41.8, about 6 points above it, with both seeds within 0.3 of each other.
+It is close to the fixed $1.5\times$ run on union (41.8 versus 42.1) while keeping 4.6 points more clean accuracy (79.6 versus 75.0), and it is 2.6 union and 1.7 clean points below official RAMP.
+\texttt{realloc\_b} gains less ($+3.1$): $\ell_\infty$, already the minimum norm in \texttt{realloc} (42.5 against 50.0 for $\ell_1$), falls further to 41.0, union is 0.9 lower, and clean accuracy is 1.4 points lower. A hand-picked ratio cannot track which norm is the minimum, which is the argument for a controller that equalises the norms.
+The ratio was chosen from test-set results and \texttt{realloc} is the better of two tries, so the $+6.2$ is optimistically selected; confirming it on held-out test images (indices 1000 to 9999) is a prerequisite for calling it a finding.
+The price is robustness at larger $\ell_\infty$ budgets: at $16/255$ \texttt{realloc} keeps 9.5\% against 11.2\% for fixed $1.0\times$, which has the same $\ell_\infty$ training budget (1.7 points); the comparison with 20.6\% for fixed $1.5\times$ is a budget effect. Some grid points are seen budgets for some runs (\texttt{realloc} trains $\ell_1$ at 18), so the grid is not a clean unseen-threat test. The $\ell_1$ curve is smooth and monotone (67.0, 38.2, 24.4 at $\varepsilon=6,18,24$ against 56.8, 15.1, 5.4 for our RAMP-style run, and 66.1, 34.2, 21.6 for official RAMP from the locked files).
+
+\subsection{Is it gradient masking?}\label{sec:masking}
+Two checks, on \texttt{realloc} and on the fixed $1.5\times$ run as the comparison. First, five extra seeded APGD-CE runs per norm, per-sample AND with the standard result:
+union 41.7 becomes 41.5 for \texttt{realloc} and 42.1 becomes 41.8 for fixed $1.5\times$ (seed 0 of each), while the plain fixed $1.0\times$ model loses 0.9 to 1.7 points on its two seeds.
+Second, the full AutoAttack suite (APGD-CE, APGD-T, FAB-T, Square, the extras run only on surviving points): FAB-T removes 2 of 1000 points on $\ell_1$ for \texttt{realloc} and nothing for fixed $1.5\times$, Square removes none, and union is unchanged
+(41.7 for \texttt{realloc}, 42.1 for fixed $1.5\times$). The extra attacks find at most 0.3 points more union on these seed-0 runs. We found no sign of masking; this is evidence, not a proof, it covers one seed, and the numbers are not comparable to the two-attack results elsewhere.
+
+\subsection{What the result does and does not say}
+The reallocation effect is large and survives the checks. Two limits matter. First, in our pipeline $\ell_1$ at nominal $\varepsilon$ is far below official RAMP (about 30 versus 48), which we suspect reflects a weak $\ell_1$ training attack (10-step SLIDE versus RAMP's APGD $\ell_1$), although the pipelines differ in other ways too.
+A part of the $+6$ may be \emph{compensation} for that weakness rather than a general property of multi-norm AT. This is untested; the discriminating experiment is to train our pipeline with an APGD-style $\ell_1$ attack, or to apply the reallocation to the official RAMP code (the per-class controllers there gave no union gain, but they did not move budget across norms).
+Second, it is one seed pair, one dataset and one architecture, with 10 epochs of fine-tuning from a shared pretrain.
+
+\section{Phase 5: the norm-level controller (implemented, not yet run on real data)}
+The controller replaces the hand-picked ratio. Each epoch it measures accuracy $A_p$ per norm at the \emph{nominal} (fixed-evaluation) $\varepsilon$ on a 1000-image held-out feedback split, and updates the budget fractions
+\[
+f_p \leftarrow \operatorname{clip}\bigl(f_p + \alpha(\bar A - A_p),\,[f_{\min},f_{\max}]\bigr),\qquad \tfrac1{|P|}\sum_p f_p = \bar f,
+\]
+raising $\varepsilon$ for the weakest norm and lowering it for the strongest, with the mean fraction projected back to $\bar f=1.083$ (the mean of \texttt{realloc}'s fractions) so the total budget is held; $\alpha=0.5$, $[0.5,2]$.
+Measuring at the nominal $\varepsilon$ avoids the thesis's ratchet, where reading robustness at a shrinking $\varepsilon$ drove the budget to zero. Evaluation is unchanged and always at fixed $\varepsilon$.
+Two configurations exist: a uniform start (\texttt{v3a\_max\_normctl}, to see whether it finds the allocation) and a start at \texttt{realloc} with $\alpha=0.25$ (\texttt{v3a\_max\_normctl\_ft}).
+Status: the scheduler has unit tests, the core suite passes (17 tests), and a 3-epoch CPU smoke on synthetic data shows the budget fractions initialise correctly and begin to separate, with accuracy at nominal logged per norm.
+That is a plumbing check only, since the model is near chance on synthetic data. There is no real-data result, and nothing here supports a claim about the controller.
+One open risk: from scratch the early accuracy signal is noise, so the uniform start might wander before the models are accurate.
+
+\section{Where the hypotheses stand}
+\begin{table}[h]\centering\small
+\begin{tabular}{p{0.07\linewidth}p{0.86\linewidth}}\toprule
+H1 & Not supported against the README comparators. Adaptive variants sit $+1$ to $+2$ above the \texttt{v3a\_max} frontier at matched clean accuracy (cleanest pair $+1.8$, 2 seeds), but the E-AT-style baseline sits $+3.3$ above the same frontier, so the gap is not attributable to adaptivity; against \texttt{v3a\_max}, \texttt{ramp} and \texttt{eat}, every full-AAT variant fails the union or the clean-drop test.\\
+H2 & Not supported: no worst-class gain from class-level $\varepsilon$ feedback, on the official RAMP code or in our pipeline.\\
+H3 & Not run.\\
+H4 & Not supported: held-out $\ell_2$ is flat across methods; robustness at off-nominal budgets tracks the training budget and, in the reallocation runs, shifts between norms with where the budget went (the grid overlaps some training budgets).\\
+New & Norm-level reallocation: about $+6$ union over the frontier at matched clean on test images, with at most 0.3 points lost to extra attacks (seed 0), ratio selected on the test set, possibly partly compensating a weak $\ell_1$ training attack. A candidate finding, not yet confirmed.\\\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Threats to validity}
+Two or three seeds and 1000 test images (about 1.6 points of binomial error on union, about 5 per class); the chord frontier is coarse; one fine-tuning recipe, one architecture, one dataset;
+a training-attack mismatch with RAMP in $\ell_1$; two-attack AutoAttack rather than the full suite as the headline metric (the full suite agreed on the two seed-0 runs where we checked).
+Attack noise: AutoAttack in the evaluation script is unseeded, so the same checkpoint scores differently across files (for \texttt{v3a\_max} seed 0, union is 30.0 in one file and 29.1 in the in-file standard run, $\ell_1$ 30.7 versus 29.8), and seeded extras cut lower-budget models by 0.9 to 1.7 against 0.2 to 0.3 for \texttt{realloc} and fixed $1.5\times$: the two-attack $\ell_1$ evaluation is less converged for low-budget models, which is the same size as the H1 gaps.
+Selection: the reallocation ratio was picked from test results. No CIFAR-100 and no thesis-scale model. Per-class conclusions are descriptive only.
+
+\section{Next steps}
+Saturday 00:00 UTC resets the 30-hour Kaggle quota. Plan: a 10-epoch controller pair (about 1.3 h) as a gate; if the fractions behave and \texttt{normctl\_ft} reaches or exceeds \texttt{realloc}, an 80-epoch from-scratch pair of controllers (about 7 h, estimated from the 10-epoch epoch time),
+then a second session with the static references at 80 epochs (\texttt{realloc} and fixed $1.0\times$). Total about 15 of 30 hours. The deciding questions are whether a controller finds the allocation without being told, and whether the effect survives the longer from-scratch schedule.
+Then, in order of value: an APGD-style $\ell_1$ training attack (to test the compensation explanation; this touches the attack code and needs the reviewer), confirming \texttt{realloc} on held-out test images (indices 1000 to 9999), full-test-set re-evaluation of the final models, and a third seed for the headline pairs.
+
+\begin{thebibliography}{9}
+\bibitem{thesis} Matoke Brian. Adaptive Adversarial Training: A Curriculum-Based Approach to Robustness. MSc thesis (supervisor: I.~Megyeri), University of Szeged, May 2025.
+\bibitem{ramp} E.~Jiang and G.~Singh. RAMP framework: Boosting adversarial robustness against multiple-$\ell_p$ perturbations. NeurIPS 2024.
+\bibitem{aa} F.~Croce and M.~Hein. Reliable evaluation of adversarial robustness with an ensemble of diverse parameter-free attacks. ICML 2020.
+\end{thebibliography}
+\end{document}

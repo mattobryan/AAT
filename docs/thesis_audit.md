@@ -113,3 +113,17 @@ to reproduce. Page numbers refer to the PDF (page index; the printed page number
     number in a different file. Squint has 2 seeds against 3 for the control and n = 1000, so a gap under about 2 pp is
     descriptive. `gate_acc` in `log.jsonl` is training-batch accuracy under 10-step PGD, not routing under AutoAttack.
 
+
+## Found while building the per-norm reallocation study (15 Oct 2026, reviewer-drafted)
+
+21. **Fixed-budget frontier gaps.** A frontier gap is defined only inside the clean-accuracy range of the fixed-budget runs (here
+    74.95 to 85.87; `aat_full` at 86.9 lies outside). The frontier is also recipe-specific: the E-AT-style and RAMP-style fine-tunes land
+    +3.3 and -1.0 off the `v3a_max` chord, so a gap of +1 to +2 for an adaptive variant is not attributable to adaptivity.
+22. **Unseeded AutoAttack variance across files.** `aat.evaluate` is unseeded, so the same checkpoint scores differently in different
+    files (`v3a_max_s0` union 30.0 in `eval_autoattack.json`, 29.1 in the in-file standard run of `eval_adaptive.json`). Compare
+    `robust` with `robust_standard` from one file only. Lower-budget models lose more to seeded extra attacks (0.9 to 1.7) than
+    higher-budget ones (0.2 to 0.3).
+23. **`realloc` was selected on test results.** The ratio 1.0/0.75/1.5 is the better of two hand-picked tries (+6.2 against +3.1), chosen
+    on the first 1000 test images. Confirm on held-out test images (indices 1000 to 9999) before calling it a finding.
+24. **The "unseen" grid overlaps training budgets.** `realloc` trains l1 at 18, so l1@18 is a seen budget for it; the l-inf price of
+    reallocation is 1.7 points against `v3a_max` (same l-inf budget), not the gap to the 1.5x run, which is a budget effect.
