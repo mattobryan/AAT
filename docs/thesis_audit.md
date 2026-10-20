@@ -127,3 +127,8 @@ to reproduce. Page numbers refer to the PDF (page index; the printed page number
     on the first 1000 test images. Confirm on held-out test images (indices 1000 to 9999) before calling it a finding.
 24. **The "unseen" grid overlaps training budgets.** `realloc` trains l1 at 18, so l1@18 is a seen budget for it; the l-inf price of
     reallocation is 1.7 points against `v3a_max` (same l-inf budget), not the gap to the 1.5x run, which is a budget effect.
+25. **`normctl_ft` starts at a test-selected point, and the controller's state must survive resume.** `v3a_max_normctl_ft` is initialised
+    at the `realloc` ratio (item 23) and every normctl arm uses its mean fraction 1.0833, so comparisons with `realloc` and the fixed runs
+    are conditional on that selection. The controller drives the norms toward equal accuracy at their nominal eps, but those accuracies are
+    not on a common scale (l2 at 0.5 scores above l1 at 12), so it may saturate at the bounds (l2 0.5x, l1 2.0x); check the logged `frac`
+    and say so if it did. The `frac` state was not saved in the resume checkpoint until 20 Oct 2026; runs resumed before that would have reset it.

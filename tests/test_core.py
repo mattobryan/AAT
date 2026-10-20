@@ -286,3 +286,25 @@ def test_static_scheduler_unchanged_by_norm_feedback_code():
     for p, n in zip(norms, [8 / 255, 0.5, 12.0]):
         assert torch.allclose(s.class_eps(p), torch.full((10,), n))
         assert set(s.summary()[p]) == {"mean", "min", "max", "zero_budget_classes"}
+
+
+def test_norm_feedback_resume_matches_uninterrupted_run():
+    norms = ["linf", "l2", "l1"]
+    fbs = [_fb(norms, a) for a in ([0.45, 0.65, 0.30], [0.44, 0.66, 0.34], [0.43, 0.66, 0.38], [0.43, 0.66, 0.40])]
+    ref = EpsScheduler(_normctl_cfg(), norms, 10, 10, "cpu")
+    for fb in fbs:
+        ref.update(fb)
+    a = EpsScheduler(_normctl_cfg(), norms, 10, 10, "cpu")
+    for fb in fbs[:2]:
+        a.update(fb)
+    st, ctl = {p: v.clone() for p, v in a.state.items()}, a.ctl_state()
+    b = EpsScheduler(_normctl_cfg(), norms, 10, 10, "cpu")  # a fresh process after a Kaggle restart
+    b.state = st
+    b.load_ctl_state(ctl)
+    for fb in fbs[2:]:
+        b.update(fb)
+    assert all(b.frac[p] == pytest.approx(ref.frac[p]) for p in norms)
+    c = EpsScheduler(_normctl_cfg(), norms, 10, 10, "cpu")  # checkpoint written before ctl state existed
+    c.state = {p: v.clone() for p, v in a.state.items()}
+    c.load_ctl_state(None)
+    assert all(c.frac[p] == pytest.approx(a.frac[p]) for p in norms)

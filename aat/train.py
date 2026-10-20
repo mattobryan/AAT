@@ -190,6 +190,7 @@ def train(cfg):
         model.load_state_dict(ck["model"]); opt.load_state_dict(ck["opt"])
         lr_sched.load_state_dict(ck["lr_sched"]); scaler.load_state_dict(ck["scaler"])
         eps_s.state, eps_s.class_rob_ema = ck["eps_state"], ck["eps_ema"]
+        eps_s.load_ctl_state(ck.get("eps_ctl"))
         norm_s.probs, norm_s.loss_gap = ck["norm_probs"], ck["norm_loss_gap"]
         start = ck["epoch"] + 1
         print(f"resumed from epoch {start}")
@@ -290,7 +291,7 @@ def train(cfg):
                          | ({"monitor_test": rec["monitor_test"]} if "monitor_test" in rec else {})))
 
         torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "lr_sched": lr_sched.state_dict(),
-                    "scaler": scaler.state_dict(), "eps_state": eps_s.state, "eps_ema": eps_s.class_rob_ema,
+                    "scaler": scaler.state_dict(), "eps_state": eps_s.state, "eps_ema": eps_s.class_rob_ema, "eps_ctl": eps_s.ctl_state(),
                     "norm_probs": norm_s.probs, "norm_loss_gap": norm_s.loss_gap, "epoch": epoch}, ck_path)
         hub.push(ck_path, hub_prefix + "last.pt")
         hub.push(os.path.join(out, "log.jsonl"), hub_prefix + "log.jsonl")

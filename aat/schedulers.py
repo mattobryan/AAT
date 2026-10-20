@@ -59,6 +59,19 @@ class EpsScheduler:
         self.frac = {p: float(cfg[p].get("init_frac", 1.0)) for p in self.ctl_norms}  # norm-level fractions
         self.ctl_acc = {}  # last nominal-eps robust acc seen by the norm-level controller
 
+    def ctl_state(self):
+        """Norm-level controller state for the resume checkpoint."""
+        return {"frac": dict(self.frac), "ctl_acc": dict(self.ctl_acc)}
+
+    def load_ctl_state(self, st):
+        """Restore the controller on resume; a checkpoint without it falls back to the fractions implied by `state`."""
+        if st:
+            self.frac.update({p: float(v) for p, v in st["frac"].items()})
+            self.ctl_acc.update(st.get("ctl_acc", {}))
+        else:
+            for p in self.ctl_norms:
+                self.frac[p] = float(self.state[p].mean()) / self.nominal[p]
+
     def bounds(self, p):
         c = self.cfg[p]
         return c.get("min_frac", 0.25) * self.nominal[p], c.get("max_frac", 1.0) * self.nominal[p]
