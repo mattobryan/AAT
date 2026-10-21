@@ -1,0 +1,5 @@
+# 80-epoch static reallocation (linf 1.0x, l2 0.75x, l1 1.5x) with a 10-step linf training attack instead of 5.
+# Stage 8 showed linf reaches only 37.0 under AutoAttack at 80 epochs (RAMP: 45.7); the 5-step training attack is the suspect.
+base: v3a_max_realloc_e80.yaml
+name: v3a_max_realloc_a10_e80
+attack: {linf: {steps: 10}}
