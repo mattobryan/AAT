@@ -16,13 +16,17 @@ The starting point is an MSc thesis on Adaptive Adversarial Training (AAT) that 
 attacked norm from feedback. An audit of that thesis found contradictory tables and, above all, evaluation at the adaptive $\varepsilon$.
 We re-test the idea on CIFAR-10 with a PreActResNet-18 under one protocol: AutoAttack's APGD-CE and APGD-T at \emph{fixed}
 $\varepsilon=(8/255,\,0.5,\,12)$ for $\ell_\infty,\ell_2,\ell_1$ on the first 1000 test images, with union robustness as the per-sample AND over the three norms.
-Four findings. (1)~On the official RAMP code, per-class budget and sample reallocation did not raise union robustness or the weakest classes.
-(2)~In our own 10-epoch fine-tuning pipeline, union robustness is governed by the \emph{total training budget}; a method is only credited if it
-beats the fixed-$\varepsilon$ clean-versus-union frontier at matched clean accuracy. The thesis-style adaptive variants sit about 1 to 2 points above that frontier, but an E-AT-style non-adaptive baseline sits 3.3 above it, so that gap is not attributable to adaptivity.
-(3)~Reallocating a roughly fixed total budget \emph{across norms} (less on $\ell_2$, more on $\ell_1$; mean fraction $1.08\times$) lifts union robustness by about 6 points above the
-frontier at matched clean accuracy (41.8 versus 35.7), and loses at most 0.3 points to extra attack seeds and to the full AutoAttack suite (seed 0 only). The ratio was chosen on test-set results and still needs confirmation on held-out images. Union tracks $\min(\ell_\infty,\ell_1)$ and $\ell_2$ is slack.
-The effect may partly compensate for a weak $\ell_1$ training attack in our pipeline, which is untested. (4)~An input-conditioned gated network (``squint'') is a null result.
-A norm-level $\varepsilon$ controller that is intended to find the allocation automatically is implemented and unit-tested but has not trained on real data.
+Findings. (1)~On the official RAMP code, per-class budget and sample reallocation did not raise union robustness or the weakest classes.
+(2)~In our 10-epoch fine-tuning pipeline, union robustness is governed by the \emph{total training budget}; adaptive variants sit about 1 to 2 points above the
+fixed-budget frontier at matched clean accuracy, but an E-AT-style non-adaptive baseline sits 3.3 above it, so that gap is not attributable to adaptivity.
+(3)~Reallocating a roughly fixed total budget \emph{across norms} (less on $\ell_2$, more on $\ell_1$) is the one large effect: about $+6$ union points over the frontier
+at 10 epochs, with at most 0.3 points lost to extra attack seeds and the full AutoAttack suite (10-epoch, seed 0). At 80 epochs from scratch the raw union gain over the fixed run recurs (26.7 to 36.8, one seed, no frontier, so not budget-adjusted).
+The ratio was chosen on test results and still needs held-out confirmation.
+(4)~Automating the allocation failed: a norm-level feedback controller whose signal comes from 10-step attacks overstates $\ell_1$ robustness by about 20 points, starting uniform it lands 4 points \emph{below} the frontier,
+and started at the static allocation it matches it at 10 epochs and loses to it at 80 (29.6 against 36.8 union).
+(5)~Our 80-epoch from-scratch runs do not reach official RAMP (44.4 union, 81.3 clean): the best reaches 36.8. They show monitor-only signs consistent with robust overfitting under a cosine schedule (one seed), and raising the PGD $\ell_\infty$ training attack from 5 to 10 steps did not change $\ell_\infty$ (APGD was not tested).
+A RAMP-inspired recipe (KL pairing, a per-batch gradient-projection variant, softplus, RAMP's learning-rate schedule) trains poorly (71.7 clean, 19.8 union), so the pipeline is not calibrated against RAMP and the remaining gap is not explained.
+Squint, an input-conditioned gated network, is a null result.
 \end{abstract}
 
 \section{Question and starting point}
@@ -154,17 +158,61 @@ The reallocation effect is large and survives the checks. Two limits matter. Fir
 A part of the $+6$ may be \emph{compensation} for that weakness rather than a general property of multi-norm AT. This is untested; the discriminating experiment is to train our pipeline with an APGD-style $\ell_1$ attack, or to apply the reallocation to the official RAMP code (the per-class controllers there gave no union gain, but they did not move budget across norms).
 Second, it is one seed pair, one dataset and one architecture, with 10 epochs of fine-tuning from a shared pretrain.
 
-\section{Phase 5: the norm-level controller (implemented, not yet run on real data)}
-The controller replaces the hand-picked ratio. Each epoch it measures accuracy $A_p$ per norm at the \emph{nominal} (fixed-evaluation) $\varepsilon$ on a 1000-image held-out feedback split, and updates the budget fractions
+\section{Phase 5: the norm-level controller}\label{sec:ctl}
+The controller replaces the hand-picked ratio. Each epoch it measures accuracy $A_p$ per norm at the \emph{nominal} (fixed-evaluation) $\varepsilon$ on a 1000-image held-out feedback split, with the same 10-step training attacks, and updates the budget fractions
 \[
 f_p \leftarrow \operatorname{clip}\bigl(f_p + \alpha(\bar A - A_p),\,[f_{\min},f_{\max}]\bigr),\qquad \tfrac1{|P|}\sum_p f_p = \bar f,
 \]
-raising $\varepsilon$ for the weakest norm and lowering it for the strongest, with the mean fraction projected back to $\bar f=1.083$ (the mean of \texttt{realloc}'s fractions) so the total budget is held; $\alpha=0.5$, $[0.5,2]$.
+raising $\varepsilon$ for the weakest norm and lowering it for the strongest, with the mean fraction projected to $\bar f=1.083$ (the mean of \texttt{realloc}'s fractions) so the total budget is held; $[f_{\min},f_{\max}]=[0.5,2]$.
 Measuring at the nominal $\varepsilon$ avoids the thesis's ratchet, where reading robustness at a shrinking $\varepsilon$ drove the budget to zero. Evaluation is unchanged and always at fixed $\varepsilon$.
-Two configurations exist: a uniform start (\texttt{v3a\_max\_normctl}, to see whether it finds the allocation) and a start at \texttt{realloc} with $\alpha=0.25$ (\texttt{v3a\_max\_normctl\_ft}).
-Status: the scheduler has unit tests, the core suite passes (17 tests), and a 3-epoch CPU smoke on synthetic data shows the budget fractions initialise correctly and begin to separate, with accuracy at nominal logged per norm.
-That is a plumbing check only, since the model is near chance on synthetic data. There is no real-data result, and nothing here supports a claim about the controller.
-One open risk: from scratch the early accuracy signal is noise, so the uniform start might wander before the models are accurate.
+A review before the first GPU run found that resume checkpoints did not save the fractions, so a resumed run restarted the controller; this was fixed and tested (audit item 25).
+Two configurations: a uniform start (\texttt{normctl}, $\alpha=0.5$) and a start at \texttt{realloc} (\texttt{normctl\_ft}, $\alpha=0.25$).
+
+\begin{table}[h]\centering\small
+\caption{Controller against the static allocation (seed 0 for the controllers, 2-seed mean for \texttt{realloc} at 10 epochs; \%).}\label{tab:ctl}
+\begin{tabular}{llrrrrrr}\toprule
+Schedule & Run & Clean & $\ell_\infty$ & $\ell_2$ & $\ell_1$ & Union & Final $f$ ($\ell_\infty/\ell_2/\ell_1$)\\\midrule
+10 ep fine-tune & \texttt{normctl} (uniform start) & 78.7 & 48.4 & 63.1 & 33.6 & 33.3 & 1.37 / 0.66 / 1.21\\
+10 ep fine-tune & \texttt{normctl\_ft} & 78.8 & 45.7 & 64.1 & 46.1 & 42.9 & 1.22 / 0.55 / 1.48\\
+10 ep fine-tune & \texttt{realloc} (static) & 79.6 & 42.5 & 65.5 & 50.0 & 41.8 & fixed 1.0 / 0.75 / 1.5\\\midrule
+80 ep scratch & \texttt{normctl\_ft} & 76.9 & 44.4 & 60.0 & 29.7 & 29.6 & 1.56 / 0.50 / 1.19\\
+80 ep scratch & \texttt{realloc} (static) & 80.9 & 37.0 & 62.8 & 49.5 & 36.8 & fixed\\\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Findings.} The uniform-start controller sits 4.0 points below the frontier (33.3 against 37.3 at its clean accuracy): its signal says $\ell_\infty$ is the weak norm
+(feedback accuracy, 10-step attacks on the held-out split, 0.46 against 0.52 for $\ell_1$ from epoch 1 on) while AutoAttack says $\ell_1$ is (33.6 against 48.4), so it moved budget to $\ell_\infty$ and left $\ell_1$ under-trained.
+The 10-step feedback attack overstates $\ell_1$ robustness by about 21 points (monitor 54.8 against AutoAttack 33.6 for \texttt{normctl}; 51.2 against 29.7 for the 80-epoch \texttt{normctl\_ft}) and $\ell_\infty$ by only 2 to 4, enough to flip the ranking. This is consistent with the suspicion that the static reallocation partly compensates for a weak $\ell_1$ attack, and is why this feedback signal did not find the allocation. It is not shown that the weak attack is the only cause: the accuracies of different norms are not on a common scale (audit item 25), and feedback from an APGD $\ell_1$ attack was not tested.
+Started at the static allocation (\texttt{normctl\_ft}) the controller matches it at 10 epochs: union 42.9 against 41.8 (one seed against a two-seed mean, within the 1.6-point binomial error) at 0.8 lower clean accuracy, with the norms more balanced ($\ell_\infty$ 45.7, $\ell_1$ 46.1).
+At 80 epochs the same controller loses clearly (29.6 against 36.8 union, 76.9 against 80.9 clean): $\ell_2$ saturates at the 0.5 floor, so part of its allocation is set by the bound and not by feedback,
+and the feedback accuracies at epoch 79 (0.51 for $\ell_1$, 0.50 for $\ell_\infty$) became 29.7 and 44.4 under AutoAttack. The initial point of \texttt{normctl\_ft} is itself test-selected (audit item 25).
+We stop pursuing feedback controllers driven by the training attack.
+
+\section{Phase 6: 80 epochs from scratch, and the gap to RAMP}\label{sec:e80}
+\begin{table}[h]\centering\small
+\caption{80 epochs from scratch, seed 0 (\%). Rows 1 to 4 use our losses and cosine schedule; rows 5 and 6 use a RAMP-style loss and RAMP's static learning-rate schedule.}\label{tab:e80}
+\begin{tabular}{lrrrrrrr}\toprule
+Run & Clean & $\ell_\infty$ & $\ell_2$ & $\ell_1$ & Union & Worst class\\\midrule
+fixed $1.0\times$ (\texttt{v3a\_max\_e80}) & 83.6 & 39.8 & 63.5 & 27.0 & 26.7 & 3.3\\
+\texttt{realloc}, 5-step $\ell_\infty$ attack & 80.9 & 37.0 & 62.8 & 49.5 & 36.8 & 9.7\\
+\texttt{realloc}, 10-step $\ell_\infty$ attack & 81.7 & 36.5 & 62.8 & 48.7 & 36.3 & 11.1\\
+\texttt{normctl\_ft} controller & 76.9 & 44.4 & 60.0 & 29.7 & 29.6 & 5.8\\\midrule
+RAMP-style loss, fixed $1.0\times$ & 71.7 & 39.0 & 55.2 & 19.9 & 19.8 & 1.0\\
+RAMP-style loss, $\ell_1$ at $1.5\times$ & 69.9 & 36.7 & 55.6 & 40.1 & 36.1 & 1.9\\\midrule
+official RAMP (2 seeds, 80 epochs) & 81.3 & 45.7 & 66.4 & 48.4 & 44.4 & 12.8\\\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{The raw union gain recurs, one seed each.} Under our losses, moving to $\ell_2$ 0.75$\times$ and $\ell_1$ 1.5$\times$ raises union by 10.1 points at 2.7 lower clean accuracy. There is no fixed-budget frontier at 80 epochs, so this is not budget-adjusted: at the 10-epoch chord slope of about $-2$ union points per clean point, roughly 5 of the 10.1 points could be the clean-accuracy trade. Under the RAMP-style loss the $\ell_1$-1.5$\times$ run does not reallocate (it has no $\ell_2$ training), it enlarges the total budget: union 19.8 to 36.1 at 1.8 lower clean accuracy.
+
+\textbf{Robust overfitting under the cosine schedule.} In the monitor (10-step PGD on 500 test images, not AutoAttack) the union of the fixed and \texttt{realloc} runs peaks near epoch 49 (0.46 and 0.45) and falls to 0.41 and 0.39 by epoch 79, while $\ell_\infty$ training accuracy climbs to 0.82 and 0.78.
+AutoAttack at the end gives $\ell_\infty$ 39.8 and 37.0 (the \texttt{realloc} run monitored at its own training $\varepsilon$), against 44.6 for the same fixed budget fine-tuned for 10 epochs from a 30-epoch $\ell_\infty$ pretrain. This is consistent with robust overfitting~\cite{rice} and with a 10-epoch fine-tune being better than 80 epochs from scratch in our pipeline; we have no checkpoints from near the peak to test it directly.
+
+\textbf{PGD step count alone does not explain the $\ell_\infty$ gap.} Doubling the PGD $\ell_\infty$ training attack to 10 steps left $\ell_\infty$ at 36.5 against 37.0 (one seed each, a 0.5-point difference against roughly 2 points of combined noise), so step count alone does not explain the 8.7-point gap to RAMP's 45.7. APGD training was not tested, and our earlier guess that the 5-step attack was the cause is not supported.
+
+\textbf{Our RAMP-style recipe is not calibrated.} With KL pairing ($\lambda=5$), gradient projection, a softplus network, $\ell_\infty$ and $\ell_1$ only, and the official static learning rate (0.05 until epoch 70, then 0.005), the fixed run reaches only 71.7 clean and 19.8 union, far below the official 81.3 and 44.4.
+Training-attack accuracy stayed low ($\ell_\infty$ 0.46) and the monitor was erratic until the learning-rate drop. The match is partial. What matches: $\lambda=5$, the static schedule, $\ell_\infty$ and $\ell_1$ only, softplus, batch size 128 and weight decay $5\cdot10^{-4}$. What does not: our ``project'' gradient projection pairs the clean and adversarial gradients of the \emph{same} model per batch, so the update always points along the adversarial gradient and is only rescaled per tensor, whereas the official one adds a term from a separately trained clean copy once per epoch; the official attacks are 10-iteration APGD for both norms (ours PGD, 5 steps for $\ell_\infty$ and 10-step SLIDE for $\ell_1$); the official code excludes BatchNorm and bias from weight decay; and its KL term is anchored on $\ell_\infty$ whereas ours pairs with the highest-loss norm. We did not isolate which of these matters.
+The $\ell_1$-1.5$\times$ row is a larger total budget, not a reallocation. A first attempt with a cosine schedule was stopped at epoch 42 after the overfitting evidence above. We therefore cannot say what closes the gap to RAMP, and the RAMP-style rows are not evidence about RAMP's recipe.
 
 \section{Where the hypotheses stand}
 \begin{table}[h]\centering\small
@@ -173,24 +221,27 @@ H1 & Not supported against the README comparators. Adaptive variants sit $+1$ to
 H2 & Not supported: no worst-class gain from class-level $\varepsilon$ feedback, on the official RAMP code or in our pipeline.\\
 H3 & Not run.\\
 H4 & Not supported: held-out $\ell_2$ is flat across methods; robustness at off-nominal budgets tracks the training budget and, in the reallocation runs, shifts between norms with where the budget went (the grid overlaps some training budgets).\\
-New & Norm-level reallocation: about $+6$ union over the frontier at matched clean on test images, with at most 0.3 points lost to extra attacks (seed 0), ratio selected on the test set, possibly partly compensating a weak $\ell_1$ training attack. A candidate finding, not yet confirmed.\\\bottomrule
+New & Static norm-level reallocation: about $+6$ union over the frontier at 10 epochs, with at most 0.3 points lost to extra attacks (10-epoch, seed 0); the raw union gain recurs at 80 epochs (one seed, not budget-adjusted). The ratio was selected on the test set, and it may partly compensate for a weak $\ell_1$ training attack. A candidate finding, not yet confirmed.\\
+New & Feedback-driven norm allocation: negative. The controller's 10-step feedback overstates $\ell_1$ robustness by about 20 points; whether that is the whole cause is untested.\\\bottomrule
 \end{tabular}
 \end{table}
 
 \section{Threats to validity}
-Two or three seeds and 1000 test images (about 1.6 points of binomial error on union, about 5 per class); the chord frontier is coarse; one fine-tuning recipe, one architecture, one dataset;
-a training-attack mismatch with RAMP in $\ell_1$; two-attack AutoAttack rather than the full suite as the headline metric (the full suite agreed on the two seed-0 runs where we checked).
-Attack noise: AutoAttack in the evaluation script is unseeded, so the same checkpoint scores differently across files (for \texttt{v3a\_max} seed 0, union is 30.0 in one file and 29.1 in the in-file standard run, $\ell_1$ 30.7 versus 29.8), and seeded extras cut lower-budget models by 0.9 to 1.7 against 0.2 to 0.3 for \texttt{realloc} and fixed $1.5\times$: the two-attack $\ell_1$ evaluation is less converged for low-budget models, which is the same size as the H1 gaps.
-Selection: the reallocation ratio was picked from test results. No CIFAR-100 and no thesis-scale model. Per-class conclusions are descriptive only.
+Two or three seeds for the 10-epoch comparisons and \emph{one} seed for every 80-epoch run; 1000 test images (about 1.6 points of binomial error on union, about 5 per class); the chord frontier is coarse and recipe-specific;
+one dataset and one architecture; two-attack AutoAttack rather than the full suite as the headline metric (the full suite agreed on the two seed-0 runs where we checked, at 10 epochs only).
+Attack noise: AutoAttack in the evaluation script is unseeded, so the same checkpoint scores differently across files (for \texttt{v3a\_max} seed 0, union is 30.0 in one file and 29.1 in the in-file standard run), and seeded extras cut lower-budget models by 0.9 to 1.7 against 0.2 to 0.3 for \texttt{realloc} and fixed $1.5\times$: the two-attack $\ell_1$ evaluation is less converged for low-budget models, which is the same size as the H1 gaps.
+Selection: the reallocation ratio was picked from test results, and so is the starting point of the \texttt{normctl\_ft} controller. The monitor numbers in Section~\ref{sec:e80} are 10-step PGD on 500 test images and are descriptive only.
+Pipeline: our losses and attacks do not match RAMP's, the RAMP-style reimplementation did not reproduce RAMP, and the cosine 80-epoch runs show monitor-only signs consistent with robust overfitting, so 80-epoch results in our pipeline do not transfer to RAMP. No CIFAR-100 and no thesis-scale model. Per-class conclusions are descriptive only.
 
-\section{Next steps}
-Saturday 00:00 UTC resets the 30-hour Kaggle quota. Plan: a 10-epoch controller pair (about 1.3 h) as a gate; if the fractions behave and \texttt{normctl\_ft} reaches or exceeds \texttt{realloc}, an 80-epoch from-scratch pair of controllers (about 7 h, estimated from the 10-epoch epoch time),
-then a second session with the static references at 80 epochs (\texttt{realloc} and fixed $1.0\times$). Total about 15 of 30 hours. The deciding questions are whether a controller finds the allocation without being told, and whether the effect survives the longer from-scratch schedule.
-Then, in order of value: an APGD-style $\ell_1$ training attack (to test the compensation explanation; this touches the attack code and needs the reviewer), confirming \texttt{realloc} on held-out test images (indices 1000 to 9999), full-test-set re-evaluation of the final models, and a third seed for the headline pairs.
+\section{What we would do with more compute}
+The weekly Kaggle quota is essentially spent. If it resets, in order of value: (1) confirm \texttt{realloc} on held-out test images (indices 1000 to 9999) and with a second seed, and run a fixed-budget frontier at 80 epochs with the static schedule;
+(2) apply the allocation to the \emph{official} RAMP code, which removes our pipeline's differences, since the earlier per-class controllers there did not move budget across norms; (3) test the compensation explanation with an APGD-style $\ell_1$ training attack (touches the attack code and needs the reviewer);
+(4) isolate why our RAMP-style reimplementation underperforms, starting with the official clean-trained-copy gradient projection; (5) save intermediate checkpoints to test robust overfitting directly; (6) test the controller with feedback from an APGD $\ell_1$ attack and on a common accuracy scale.
 
 \begin{thebibliography}{9}
 \bibitem{thesis} Matoke Brian. Adaptive Adversarial Training: A Curriculum-Based Approach to Robustness. MSc thesis (supervisor: I.~Megyeri), University of Szeged, May 2025.
 \bibitem{ramp} E.~Jiang and G.~Singh. RAMP framework: Boosting adversarial robustness against multiple-$\ell_p$ perturbations. NeurIPS 2024.
 \bibitem{aa} F.~Croce and M.~Hein. Reliable evaluation of adversarial robustness with an ensemble of diverse parameter-free attacks. ICML 2020.
+\bibitem{rice} L.~Rice, E.~Wong and J.~Z.~Kolter. Overfitting in adversarially robust deep learning. ICML 2020.
 \end{thebibliography}
 \end{document}
