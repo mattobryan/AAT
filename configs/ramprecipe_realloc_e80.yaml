@@ -1,5 +1,0 @@
-# ramprecipe_e80 with the l1 training budget at 1.5x (18.0); linf stays at 8/255. Evaluation still uses the fixed eval.seen eps.
-base: ramprecipe_e80.yaml
-name: ramprecipe_realloc_e80
-eps:
-  l1: {nominal: 18.0}

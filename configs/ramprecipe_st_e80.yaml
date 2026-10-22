@@ -1,0 +1,13 @@
+# RAMP's recipe in our pipeline, 80 epochs from scratch: linf + l1, max-CE + KL pairing (lambda 5), gradient projection, softplus1 PreActResNet-18,
+# and RAMP's static learning-rate schedule (0.05 until epoch 70, then 0.005; `--lr-schedule=static` in the official code), which is what multistep
+# with milestone 70 gives. The first RAMP-recipe attempt (ramprecipe_e80, cosine) was stopped: every 80-epoch run with a cosine schedule peaked in
+# monitor union near epoch 50 and then lost 4 to 7 points while train adversarial accuracy rose to 0.8 (robust overfitting). Training attacks are 5-step
+# linf and 10-step l1 PGD (a 10-step linf attack did not change linf, run v3a_max_realloc_a10_e80). Our gradient projection uses the clean gradient of the same
+# model, not the official per-epoch clean-trained copy.
+base: ramp.yaml
+name: ramprecipe_st_e80
+init_from: null
+model: preactresnet18_softplus
+train: {epochs: 80, lr_schedule: multistep, milestones: [70]}
+loss: {lambda_kl: 5.0}
+monitor: {every: 10}
