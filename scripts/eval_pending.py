@@ -2,6 +2,7 @@
 
     python scripts/eval_pending.py --runs v3a_max_s0 aat_full_s0 ...
     python scripts/eval_pending.py --adaptive --runs squint_v0_s0 ...   # gate-aware adaptive attack for gated models
+    python scripts/eval_pending.py --heldout --runs v3a_max_realloc_s0 ... # held-out test images 1000..1999 (eval_heldout.json)
 
 Sits after training in the Kaggle notebook. For every run it restores final.pt and any earlier result from the
 Hugging Face repo, skips runs that already have a result, runs `python -m aat.evaluate --run runs/<run>` (fixed-epsilon
@@ -32,12 +33,14 @@ def main():
     ap.add_argument("--ngpu", type=int, default=None)
     ap.add_argument("--adaptive", action="store_true", help="run scripts/eval_gated_adaptive.py (eval_adaptive.json)")
     ap.add_argument("--strong", action="store_true", help="run scripts/eval_strong.py, full AutoAttack suite (eval_strong.json)")
+    ap.add_argument("--heldout", action="store_true", help="run scripts/eval_heldout.py on test images 1000..1999 (eval_heldout.json)")
     ap.add_argument("evaluate_args", nargs=argparse.REMAINDER, help="extra args for aat.evaluate, after --")
     a = ap.parse_args()
 
-    kind = "strong" if a.strong else "adaptive" if a.adaptive else None
+    kind = "strong" if a.strong else "heldout" if a.heldout else "adaptive" if a.adaptive else None
     result_name = f"eval_{kind}.json" if kind else "eval_autoattack.json"
-    script = {"strong": "scripts/eval_strong.py", "adaptive": "scripts/eval_gated_adaptive.py"}.get(kind)
+    script = {"strong": "scripts/eval_strong.py", "heldout": "scripts/eval_heldout.py",
+              "adaptive": "scripts/eval_gated_adaptive.py"}.get(kind)
     todo, missing = [], []
     for r in a.runs:
         if restore(r, result_name):

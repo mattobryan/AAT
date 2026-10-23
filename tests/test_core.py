@@ -308,3 +308,19 @@ def test_norm_feedback_resume_matches_uninterrupted_run():
     c.state = {p: v.clone() for p, v in a.state.items()}
     c.load_ctl_state(None)
     assert all(c.frac[p] == pytest.approx(a.frac[p]) for p in norms)
+
+
+def test_heldout_eval_scores_union_and_clean_on_given_tensors():
+    import os
+    import sys
+
+    import torch.nn as nn
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    from eval_heldout import heldout_eval
+    torch.manual_seed(0)
+    model = nn.Sequential(nn.Flatten(), nn.Linear(3 * 32 * 32, 10)).eval()
+    x, y = torch.rand(6, 3, 32, 32), torch.randint(0, 10, (6,))
+    res = heldout_eval(model, x, y, {"linf": 1e-6, "l1": 1e-6}, bs=6, dev="cpu")
+    pred = model(x).argmax(1)
+    assert res["clean"] == pytest.approx((pred == y).float().mean().item())
+    assert res["robust"]["linf"] == res["clean"] and res["robust"]["l1"] == res["clean"] and res["union"] == res["clean"]

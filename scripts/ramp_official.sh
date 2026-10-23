@@ -16,6 +16,11 @@
 #                 needs $DATA/ti_500K_pseudo_labeled.pickle (Carmon et al. 500K; HF cache/ or `wrn_data`); WRN_BS overrides batch size
 #   ramp          fine-tuning, lambda=1.5 (repo default = paper Table 24 row); ramp05: lambda=0.5
 #   eat, max      fine-tuning baselines from the same repo
+#   rampeps_<arm> official fine-tuning (as `ramp`, lambda 1.5, 3 epochs from pretr_Linf) with a changed TRAINING budget, to test
+#                 per-norm budget allocation on the official losses and attacks (docs/prereg_official_ramp.md). Arms:
+#                 f100 (default budgets), f125 / f150 (Linf and L1 both x1.25 / x1.5), l1x150 / l1x175 (L1 only), linfx125 (Linf only).
+#                 No --final_eval: the official script evaluates at the TRAINING eps (RAMP.py, audit item 28), so report only
+#                 the `eval` command's fixed-eps AutoAttack. Run names rampeps_<arm>_ft_s<seed>.
 # Checkpoints sync to the Hugging Face repo in $HF_REPO (token: $HF_TOKEN or the Kaggle secret HF_TOKEN).
 # RAMP runs resume automatically; each session stops cleanly after $TIME_BUDGET_H hours (default 11).
 set -euo pipefail
@@ -43,6 +48,9 @@ install)
   git -C "$EXT" apply --check "$ROOT/baselines/aat_on_ramp.patch" 2>/dev/null && git -C "$EXT" apply "$ROOT/baselines/aat_on_ramp.patch"
   # class-sampling fine-tune (H1 proxy; --cls_sample uniform|feedback) on top of both patches: baselines/class_sampler.patch
   git -C "$EXT" apply --check "$ROOT/baselines/class_sampler.patch" 2>/dev/null && git -C "$EXT" apply "$ROOT/baselines/class_sampler.patch"
+  # --l_eps takes several "<Norm>_<size>" pairs (budget-allocation arms, rampeps_*): baselines/ramp_multi_eps.patch, applied last
+  git -C "$EXT" apply --check "$ROOT/baselines/ramp_multi_eps.patch" 2>/dev/null && git -C "$EXT" apply "$ROOT/baselines/ramp_multi_eps.patch"
+  grep -q "for pair in args.l_eps.split" "$EXT/RAMP.py" || { echo "multi-eps patch missing in RAMP.py (baselines/ramp_multi_eps.patch did not apply): rampeps_* arms would crash after the first run"; exit 1; }
   cp "$ROOT/aat/hub.py" "$EXT/hub_sync.py"
   # dependencies first, then a full import check (also imports the official RAMP.py) before anything else
   pip install -q -r "$ROOT/requirements-kaggle.txt" || {
@@ -96,6 +104,16 @@ train)
     ramp_wrn)     script=RAMP_cifar10_aug.py; extra="--kl --max ${WRN_BS:+--batch_size $WRN_BS}"
                   common="--lr-max 0.01 --finetune_model --lr-schedule=piecewise-ft --model_name RB_Gowal2020Uncovering_28_10_extra --at_iter 10 --epochs 3 --eval_freq 10 --data_dir $DATA"
                   [ -f "$DATA/ti_500K_pseudo_labeled.pickle" ] || bash "$0" wrn_data ;;
+    rampeps_*)    script=RAMP.py;      extra="--kl --max $resume"
+                  case ${method#rampeps_} in
+                    f100) epsarg="" ;;
+                    f125) epsarg="Linf_0.0392157 L1_15" ;;
+                    f150) epsarg="Linf_0.0470588 L1_18" ;;
+                    l1x150) epsarg="L1_18" ;;
+                    l1x175) epsarg="L1_21" ;;
+                    linfx125) epsarg="Linf_0.0392157" ;;
+                    *) echo "unknown rampeps arm: $method"; exit 1 ;;
+                  esac ;;
     eat)          script=eat_train.py; extra="" ;;
     max)          script=MAX.py;       extra="" ;;
   esac
@@ -103,7 +121,7 @@ train)
   for s in $seeds; do
     fname=$(run_name $method $s)
     # finished = official final-eval log exists locally or on the Hub
-    done_f=log_eval_final.txt; case $method in cls_ctrl|cls_fb) done_f=ep_90_0.pth;; esac  # cls arms: our own AutoAttack eval only
+    done_f=log_eval_final.txt; case $method in cls_ctrl|cls_fb) done_f=ep_90_0.pth;; rampeps_*) done_f=ep_3_0.pth;; esac  # cls arms: our own AutoAttack eval only
     [ -f "trained_models/$fname/$done_f" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" \
         "ramp_official/$fname/$done_f" "trained_models/$fname/$done_f" >/dev/null 2>&1 || true
     [ -f "trained_models/$fname/$done_f" ] && { echo "done already: $fname"; continue; }
@@ -118,9 +136,9 @@ train)
       python -c "import torch,sys;e=torch.load(sys.argv[1],map_location='cpu')['epoch'];assert 79<=e<89,e;print('seed state epoch',e+1)" "$rd/resume.pth"
     fi
     fe="--final_eval --n_ex_final 1000"   # official eval on the same 1000 points, to cross-check ours
-    case $method in cls_ctrl|cls_fb) fe="";; esac
+    case $method in cls_ctrl|cls_fb|rampeps_*) fe="";; esac
     echo ">> $fname on GPU $gpu"
-    CUDA_VISIBLE_DEVICES=$gpu python -u $script $common $extra $fe --seed $s --fname $fname 2>&1 \
+    CUDA_VISIBLE_DEVICES=$gpu python -u $script $common $extra $fe ${epsarg:+--l_eps "$epsarg"} --seed $s --fname $fname 2>&1 \
       | grep --line-buffered -v "it/s\]" | sed -u "s/^/[$fname] /" | tee "$ROOT/logs_official_$fname.txt"
     if [ "$method" = ramp_wrn ]; then  # RAMP_cifar10_aug.py has no resume/Hub sync: push the results ourselves
       for f in ep_3_0.pth log_train.txt log_eval_final.txt; do
@@ -134,6 +152,9 @@ eval)
   for s in $seeds; do
     fname=$(run_name $method $s)
     ep=3; case $method in ramp_scratch|aat_ramp|aat_rel|aat_flip) ep=80;; cls_ctrl|cls_fb) ep=90;; esac
+    res="$ROOT/runs_official/$fname/eval_autoattack.json"
+    [ -f "$res" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/eval_autoattack.json" "$res" >/dev/null 2>&1 || true
+    [ -f "$res" ] && { echo "eval done already: $fname"; continue; }
     ck="$EXT/trained_models/$fname/ep_${ep}_0.pth"
     [ -f "$ck" ] || python "$ROOT/aat/hub.py" pull "${HF_REPO:-none}" "ramp_official/$fname/ep_${ep}_0.pth" "$ck"
     ecfg=official_eval; [ "$method" = ramp_wrn ] && ecfg=official_eval_wrn

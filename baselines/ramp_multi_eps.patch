@@ -1,0 +1,17 @@
+diff --git a/RAMP.py b/RAMP.py
+index d343160..3f1b78f 100755
+--- a/RAMP.py
++++ b/RAMP.py
+@@ -222,8 +222,10 @@ def main():
+         args.l_eps = [eps_dict[args.dataset][c] for c in args.l_norms]
+     else:
+         # args.l_eps = [float(c) for c in args.l_eps.split(' ')]
+-        norm, size = args.l_eps.split('_')[0], float(args.l_eps.split('_')[1])
+-        eps_dict[args.dataset][norm] = size
++        # one or more space-separated "<Norm>_<size>" pairs, e.g. "Linf_0.0392 L1_18" (the original took a single pair)
++        for pair in args.l_eps.split(' '):
++            norm, size = pair.split('_')[0], float(pair.split('_')[1])
++            eps_dict[args.dataset][norm] = size
+         args.l_eps = [eps_dict[args.dataset][c] for c in args.l_norms]
+     if not args.l_iters is None:
+         args.l_iters = [int(c) for c in args.l_iters.split(' ')]
