@@ -1,0 +1,178 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs,amsmath,amssymb,hyperref}
+\usepackage[font=small]{caption}
+\title{Adaptive adversarial robustness: where the project stands, the mathematics,\\and a falsifiable path forward}
+\author{Matoke Brian\\\small Roadmap, 23 October 2026. Draft: reviewer findings applied, not re-reviewed.}
+\date{}
+\begin{document}
+\maketitle
+\section{Why this document exists}
+Three weeks of experiments produced many numbers and little direction. The reason is structural: we ran experiments without a written theory, so no result could contradict a prediction.
+This document traces what the thesis claimed, what has and has not been tested, what the mathematics says about each mechanism, and what to do next, with a prediction and a kill criterion attached to every proposed experiment.
+The curve areas and the 45-run statistic below were newly computed from the evaluation files for this document; every other number is from the status report (\texttt{full\_report.tex}).
+
+\section{Three meanings of ``adaptive'', and which one the thesis tested}
+The word covers three different things, and it is easy to slide between them.
+\begin{enumerate}
+\item \textbf{Adaptive training (a curriculum).} The training signal depends on feedback: the budget $\varepsilon$, the attacked norm, or the sample weights change during training. The deployed model $f_\theta(x)$ is a fixed function. This is what the thesis's AAT does.
+\item \textbf{Adaptive inference (the pupil).} The deployed system changes its behaviour with the input: $f_\theta(x;\,s(x))$ where $s(x)$ estimates how corrupted $x$ is, and the system spends more or less denoising, capacity or caution accordingly. This is the biological analogy you describe, and it is what our ``squint'' network tried.
+\item \textbf{Adaptive evaluation.} The attacker adapts to the defence. ``Adaptive attack'' is the standard term in robustness evaluation (Tram\`er et al.\ 2020), and any inference-time defence in sense 2 must be evaluated this way.
+\end{enumerate}
+The thesis is titled a curriculum-based approach, which is sense 1, and every mechanism it implements is sense 1; a system-level (sense 2) adaptive robustness was never implemented in it. The pupil analogy is sense 2, and the gap between the analogy and what was built is a main reason the project feels circular: sense 1 can only change \emph{how a fixed network is trained}, so its ceiling is set by what a better-trained static network can do.
+
+\section{Trace: what was claimed, tested and not tested}
+\begin{table}[h]\centering\small
+\caption{The thesis mechanisms and their status after the rebuild. ``10-ep'' is the 10-epoch fine-tune pipeline, ``80-ep'' is 80 epochs from scratch.}
+\begin{tabular}{p{0.27\linewidth}p{0.17\linewidth}p{0.48\linewidth}}\toprule
+Mechanism (thesis name) & Status & Result\\\midrule
+Per-class $\varepsilon$ feedback (3B, Eq.~4.19) & tested, 10-ep and official RAMP & no resolvable gain; worst class not improved\\
+Per-\emph{sample} $\varepsilon$ (1B, Eq.~A.1), the mechanism closest to the pupil & \textbf{not run in the rebuild} & --\\
+Global $\varepsilon$ ramp, a true curriculum (1A) & \textbf{not run in the rebuild} & --\\
+Adaptive norm \emph{sampling} (2B, Eq.~4.20) against cyclic (2A) & \textbf{not run in the rebuild} (H3) & --\\
+Adaptive norm loss weights + hybrid loss + KL (full AAT) & tested, 10-ep & $+1$ to $+2$ over the fixed frontier, less than the E-AT baseline's $+3.3$\\
+Evaluation on unseen threats (H4) & tested, 10-ep & flat; $\ell_2$ is slack for every method\\
+Input-conditioned gating (``squint'') & tested, 10-ep & null\\
+Norm-level budget feedback (new) & tested & uniform start fails; static start equals the static allocation at 10 epochs, loses at 80\\
+Static norm-level budget allocation (new) & tested, 10-ep and 80-ep, single seed at 80 & the one large effect: about $+6$ at 10 epochs; ratio chosen on test images (audit 23)\\
+CIFAR-100, which the thesis claims to evaluate & never run & --\\\bottomrule
+\end{tabular}
+\end{table}
+Three of the thesis's central mechanisms, including the two that are genuinely curriculum-like (per-sample $\varepsilon$ and the $\varepsilon$ ramp) and the adaptive norm sampling of H3, were deprioritised during the week and not run in the rebuild. The conclusion ``adaptive training does not help'' therefore covers only the class-level and weighting mechanisms.
+
+\subsection{Why the numbers seem to fall}
+They do not fall because the ideas got worse; the \emph{regime} changed. The best 10-epoch figures (union 41.8 for the static allocation, 42.1 for fixed $1.5\times$, 42.9 for the controller) come from fine-tuning an $\ell_\infty$-pretrained model for 10 epochs, a regime with little room to overfit.
+Moving to 80 epochs from scratch (36.8) exposed robust overfitting, and the RAMP-style reimplementation (19.8) shows that our reimplementation does not reproduce RAMP; it differs from the official code in several ways (audit item 26), so the cause is not identified. Each step compared different pipelines, so the sequence of numbers is not a trend in the method.
+
+\section{Theory}
+Notation: $f_\theta$ a classifier, $(x,y)$ data, $B_p(\varepsilon)$ the $\ell_p$ ball, $\ell$ the loss. Robust accuracy under norm $p$ at budget $\varepsilon$ is $a_p(\varepsilon;\theta)=\Pr[\,f_\theta(x{+}\delta)=y\ \ \forall\delta\in B_p(\varepsilon)\,]$, non-increasing in $\varepsilon$.
+Union robustness at the evaluation budgets $\varepsilon^\star=(\varepsilon_\infty^\star,\varepsilon_2^\star,\varepsilon_1^\star)$ is $U(\theta)=\Pr[\text{correct under all three balls}]\le\min_p a_p(\varepsilon^\star_p)$.
+
+\subsection{Adaptive $\varepsilon$ is ill-posed without a constraint}
+The standard objective is $\min_\theta \mathbb E\max_{\delta\in B_p(\varepsilon)}\ell$. If $\varepsilon(x)$ is allowed to be chosen to \emph{minimise} the same loss, the inner problem is minimised at $\varepsilon(x)=0$, which is analogous to the ``zero-budget classes'' collapse the thesis observed; the collapse there came through a ratchet (robustness read at the nominal $\varepsilon$ while $\varepsilon$ was lowered, audit item~4), not through a controller minimising the loss, but the endpoint is the same.
+Three well-posed alternatives exist:
+(a)~hold the mean budget fixed and reallocate it (the class-level \texttt{aat\_rel} did; the norm-level allocation used a mean fraction of $1.083$). Minimising the loss at a fixed mean is itself a corner solution that sends budget to the least $\varepsilon$-sensitive groups, so (a) is well-posed only together with a max-min objective as in Section~\ref{sec:minimax};
+(b)~maximise the minimal adversarial distance $\rho_\theta(x,y)=\inf\{\|\delta\|_p:f_\theta(x{+}\delta)\neq y\}$ (zero if $x$ is misclassified), as in MMA training, so $\varepsilon(x)$ is tied to the sample's own distance;
+(c)~maximise robust radius subject to correctness, whose expectation is the area under the robust-accuracy curve,
+$\mathbb E[\min(\rho,\varepsilon_{\max})\,\mathbf 1_{\rm correct}]=\int_0^{\varepsilon_{\max}}a_p(\varepsilon)\,d\varepsilon$.
+With $\rho$ as defined in (b) and $a_p(\varepsilon)=\Pr[\text{correct}\wedge\rho>\varepsilon]$, the identity in (c) is exact by the layer-cake formula; attack-based estimates of $a_p$ only approximate it. It matters because \emph{a well-posed adaptive-$\varepsilon$ method should target (b) or (c), not the single point $a_p(\varepsilon^\star)$ that a fixed-$\varepsilon$ evaluation reads} (the thesis controllers optimise neither). Judging such a method at one $\varepsilon^\star$ tests the wrong functional.
+
+\subsection{A fixed-$\varepsilon$ evaluation induces a two-dimensional frontier}
+At a single $\varepsilon^\star$, the training budget is a knob that trades clean accuracy for robust accuracy: in our runs union goes from 21.1 to 42.1 while clean goes from 85.9 to 75.0 as the training budget goes from $0.75\times$ to $1.5\times$.
+Any method that changes the effective budget moves along this frontier. The fair question is therefore whether a method lies \emph{above} the frontier at its own clean accuracy, which is the control we built. Under this control the thesis-style adaptive variants gain about 1 to 2 points, which is smaller than the spread between training recipes at the same budget (the E-AT-style baseline sits $+3.3$ and the RAMP-style baseline $-1.0$ from the same frontier, audit item 21).
+
+A concrete illustration that one evaluation point hides the curve: the fixed $1.5\times$ run and the static reallocation have the same union (42.1 and 41.8) but very different curves. The normalised trapezoid area over $[4,16]/255$ for $\ell_\infty$ and $[6,24]$ for $\ell_1$ (grid $\{4,8,12,16\}/255$ and $\{6,12,18,24\}$; the seen budget from AutoAttack, the others APGD-CE; means over 2, 2 and 3 seeds; descriptive) is 42.1 ($\ell_\infty$) and 37.7 ($\ell_1$) for fixed $1.5\times$, 35.2 and 44.6 for the reallocation, and 37.5 and 25.3 for fixed $1.0\times$. Note that $\ell_1$ at 18 is a training budget for the reallocation run (audit item 24). A curriculum that is designed to optimise the area is not credited by one point of that curve.
+
+\subsection{Multi-norm training as a minimax allocation problem}\label{sec:minimax}
+Let $f_p$ be the training budget fraction for norm $p$ and $e_p(f)=1-a_p(\varepsilon^\star_p;\theta(f))$ the resulting robust error. Because $U\le\min_p a_p$, union error is bounded below by $\max_p e_p$; across the 45 of our runs that have all three norms, $\min_p a_p-U$ averages 0.5 points (maximum 2.8) and $\ell_2$ is never the minimum. So, to a good approximation,
+\[
+\min_{f}\ \max_{p}\ e_p(f)\quad\text{s.t.}\quad \tfrac1{|P|}\sum_p f_p=\bar f,\ \ f\in[f_{\min},f_{\max}]^{|P|}.
+\]
+If each $e_p$ is decreasing in its own $f_p$, cross-effects are weak, and the mean-fraction constraint is a faithful proxy for a capacity or clean-accuracy cost (it adds budgets in arbitrary nominal units, and the static allocation lost 3.3 clean points), the optimum equalises the errors of the \emph{active} norms and pushes slack norms to the lower bound (water-filling). The approximation $U\approx\min_p a_p$ is weakest exactly at equalisation: the largest gap among the 45 runs (2.8) is the controller started at the static allocation, and fixed $1.5\times$ has 1.0 to 1.3; the 0.5 average comes mostly from runs with one dominant norm. The assumptions give three predictions that the data do not contradict; this is a check and not a proof, and all three rest on a ratio chosen on test results (audit items 23 and 25):
+(i)~$\ell_2$, which is slack, should receive the minimum budget (the allocation that worked cut it to $0.75\times$ and its robustness did not change);
+(ii)~at a good allocation the binding norms should have similar accuracy: \texttt{normctl\_ft} reached $\ell_\infty$ 45.7 against $\ell_1$ 46.1 and union 42.9, while \texttt{realloc} with $42.5$ against $50.0$ had 41.8 (one seed against two, so the difference is within noise);
+(iii)~the symmetric allocation (all norms at the same fraction, the fixed baseline) is dominated whenever the $e_p$ differ, which is the observed gap to the frontier.
+A Lagrangian view suggests the thesis's two mechanisms are two halves of one problem: $\min_\theta\max_{\lambda\in\Delta}\sum_p\lambda_p L_p(\theta;\varepsilon_p)$, where the multipliers $\lambda$ play the role of the adaptive norm weights (the form $\lambda_p\propto e^{-\gamma R_p}$ of Eq.~4.20 is an entropy-regularised best response, one multiplicative-weights step from uniform) and the budgets $\varepsilon_p$ are a resource that this objective does not treat as variables. This is a framing, not a result: the thesis did not state it, and convergence is unproven because $L_p$ is non-convex in $\theta$.
+
+\subsection{Why the feedback controller failed, and what the fix must be}
+A controller is only as good as its measurement of $e_p$. Ours measured accuracy with a 10-step attack; for $\ell_1$ that overstates robustness by about 21 points (monitor 54.8 against AutoAttack 33.6; 51.2 against 29.7), against 2 to 4 for $\ell_\infty$. The estimated errors then ranked $\ell_\infty$ as the weakest norm and the controller fed it budget. The consequence is a bias in the equalisation; whether that bias is the whole story, or the idea itself is flawed, is untested.
+There is a second, independent flaw: the update drives all three accuracies to a common value, which cannot be reached because $\ell_2$ accuracy is always higher; the correct target is the minimax one, adjusting only the binding norms. So a valid controller needs (1) an evaluation-grade attack in its feedback (APGD-CE plus APGD-T at the same $\varepsilon^\star$; the held-out feedback split already exists) and (2) a minimax update that only reallocates between the currently weakest norms.
+
+\subsection{Inference-time adaptivity (the pupil) and its limits}
+Writing the adaptive system as $f(x;s(x))$ puts the estimate $s$ inside the model. An attacker who controls $x{+}\delta$ also controls $s(x{+}\delta)$, so the robustness of the composite is the robustness of a larger static model, and misrouting caps it at that of the weakest expert the attacker can route to; the gate therefore has to be evaluated adaptively (Tram\`er et al.\ 2020; Athalye et al.\ 2018). Our gate was not: the clean-input gate used its first expert on 0.6\% of inputs while the $\ell_1$-adversarial gate used it on 50\%, so the attacker moved the routing.
+Input-dependent processing can still help when the threat is \emph{separable} from the input statistics: sparse large $\ell_1$ perturbations and dense small $\ell_\infty$ ones leave different traces, so an estimate of the threat level can select a denoising strength or expert. My hypothesis, untested here, is that it will not help against a threat that mixes the two (an $\ell_1{+}\ell_\infty$ perturbation) unless the system is trained on that mixture, and any claim has to be made against an attack that differentiates through $s$.
+This is the genuine mathematical content of your pupil analogy: a biological pupil adapts to a quantity (light) the world does not choose adversarially; an adversary chooses the quantity the controller reads.
+
+\subsection{The jigsaw example: robustness through structure and context}
+Your example of recognising a person from a shuffled or partial image is about a different mechanism: robustness from \emph{compositional, local evidence} and priors, not from a budget schedule. In the robust-features view (Ilyas et al.\ 2019) adversarial examples exploit non-robust but predictive features, and adversarial training biases the network toward features that survive perturbation.
+Mechanisms that make this explicit are patch-level or part-level evidence aggregation, ablation-based smoothing, and priors over natural images used for purification with a strength chosen from the estimated corruption. These are hypotheses for the PhD direction; this project did not test any of them, and the literature section below should be read as the evidence base for whether they work.
+
+\section{What the literature says}
+Papers marked $\ast$ were opened and read on 23 October 2026 (alphaXiv); the others are cited only through those papers or from memory and were not opened.
+\begin{table}[h]\centering\small
+\begin{tabular}{p{0.30\linewidth}p{0.62\linewidth}}\toprule
+Paper & What it shows that matters here\\\midrule
+RAMP$^\ast$ (Jiang and Singh, arXiv 2402.06827, NeurIPS 2024) & The multi-norm baseline we measure against: $\ell_\infty$ and $\ell_1$ trained jointly with KL logit pairing and gradient projection.\\
+Epsilon-Scheduling$^\ast$ (Ngnaw\'e et al., 2509.23325, ICLR 2026) & A two-hinge $\varepsilon$ schedule fixes ``suboptimal transfer'' when robustly fine-tuning \emph{non-robust} backbones, and the paper introduces \emph{expected robustness}, the mean accuracy over $\varepsilon\in[0,\varepsilon_g]$, because the single-$\varepsilon$ metric hides the gain. It reports that linear $\varepsilon$ warm-up gives limited gains for ResNets trained from scratch (citing Pang et al.\ 2021) and that drawing $\varepsilon$ uniformly at random often hurts transfer. Evaluation is $\ell_\infty$ only.\\
+RobustLT$^\ast$ (Zhang et al., 2605.13395, 2026) & Class-wise $\varepsilon$ has a theory, but for \emph{class imbalance}: in a binary Gaussian model, minority classes need a larger $\varepsilon$ ($\varepsilon_{-1}-\varepsilon_{+1}\propto\sqrt{\log K}$), with the \emph{mean} $\varepsilon$ held fixed and an $\varepsilon$ ramp over the first iterations. Gains are modest, on long-tailed CIFAR.\\
+Adversarial Frontiers$^\ast$ (Scionis et al., 2607.19855, 2026) & Single-$\varepsilon$ AutoAttack rankings are unstable because robustness--$\varepsilon$ curves cross; it proposes curve-based evaluation with minimum-norm attack ensembles. Its $\ell_1$ attack ensemble gained the most from extra queries (mean attack-optimality index $+1.12$ against $+0.28$ for $\ell_\infty$), so $\ell_1$ is the least converged attack.\\
+RoME$^\ast$ (Kim et al., 2607.06109, 2026) & Input-dependent routing for multi-norm training: a gate sends different threats through different low-rank experts. A naive gate learns \emph{threat-agnostic} routing, and the paper adds gating diversification. Threats are separable from the input: $\ell_1$ is more distinguishable in local patch features, $\ell_\infty$ in global features. It evaluates a white-box \emph{gate-misrouting attack}. Architecture: ViT-B, so numbers are not comparable with ours.\\
+TaFD$^\ast$ (Xie et al., 2606.17540, 2026) & A threat classifier plus per-threat experts for $\ell_p$ and semantic threats, with a first-order argument that joint training suffers gradient incompatibility. It evaluates through the hard routing with BPDA.\\
+OPL$^\ast$ (Habibi et al., 2609.08683, 2026) & Robustness from an oscillatory (Kuramoto) architecture plus predictive pretraining, with no adversarial training: 76.6\% under randomised AutoAttack with EoT on CIFAR-10. The authors report that a transfer attack gives a lower number (70.6\%) and so do not treat the figure as a worst-case bound. A transfer attack scoring below the white-box attack is a gradient-masking signal, so the headline should be treated as unverified.\\
+MMA, CAT, MSD, E-AT, robust features, adaptive attacks, robust overfitting & Ding et al.\ 2020 (margin-driven instance-wise $\varepsilon$, as described in the Epsilon-Scheduling paper), Cai et al.\ 2018 (curriculum over attack steps), Maini et al.\ 2020 (MSD), Croce and Hein 2022 (E-AT), Ilyas et al.\ 2019 (robust features), Athalye et al.\ 2018 and Tram\`er et al.\ 2020 (adaptive attacks), Rice et al.\ 2020 (robust overfitting). Not opened; listed in the bibliography as such.\\\bottomrule
+\end{tabular}
+\end{table}
+\textbf{What this implies, and only what these sources support.}
+(1)~The literature already moves toward curve-based evaluation (expected robustness, frontiers); our fixed-$\varepsilon$ frontier control is the right instinct, and a stronger version reports the area as well.
+(2)~Class-wise adaptive $\varepsilon$ is theoretically motivated by class imbalance. CIFAR-10 is balanced, so our null is consistent with that theory; the setting where it should matter is long-tailed data.
+(3)~$\varepsilon$ curricula help when the initialisation is poorly matched (a non-robust backbone). Our 10-epoch fine-tune starts from an $\ell_\infty$-robust model, a regime in which that cited motivation (poor transfer from a non-robust initialisation) does not apply.
+(4)~Threat-aware routing is an active 2026 line, reported to work on stronger backbones with adaptive checks on the gate. Squint's gate was supervised (\texttt{lambda\_gate} 0.5) yet its routing moved under attack (0.6\% to 50\% on the first expert), which is misrouting; what separates it from the published variants is not established, so the idea is not refuted.
+(5)~$\ell_1$ attacks are the least converged, which supports reading our $\ell_1$ numbers, training attack and feedback with caution.
+
+\section{What can be claimed today}
+\begin{table}[h]\centering\small
+\begin{tabular}{p{0.45\linewidth}p{0.45\linewidth}}\toprule
+Supported & Not supported / not tested\\\midrule
+The fixed-$\varepsilon$ evaluation defines a clean-versus-union frontier, and any method must be judged against it. &
+Adaptive robustness as a property of a deployed system (sense 2); our one attempt, squint, is null.\\
+Union tracks $\min(\ell_\infty,\ell_1)$ and $\ell_2$ is never binding (45 runs). &
+Per-sample $\varepsilon$, the $\varepsilon$ ramp and adaptive norm sampling: not run in the rebuild.\\
+Static allocation across norms beats the symmetric allocation by about 6 points at matched clean accuracy (10 epochs, ratio chosen on test images). &
+That the allocation gain survives at 80 epochs budget-adjusted, on official RAMP, or on held-out images.\\
+Feedback from a weak attack mis-allocates. &
+That a feedback controller with an evaluation-grade attack and a minimax update works.\\\bottomrule
+\end{tabular}
+\end{table}
+\section{Candidate programmes}
+Each programme states a prediction before any run and a kill criterion, so that a result can contradict us.
+
+\textbf{Programme A: minimax allocation of the training budget across norms.} The defensible core.
+\emph{Claim to test:} the allocation effect is real on a strong, official pipeline, and a controller with an evaluation-grade signal finds it without a test-selected starting point.
+\emph{Decisive first test, using the official RAMP code in its fine-tuning mode:} that mode (\texttt{--finetune\_model}, 3 epochs, which must be passed because the default is 20; from the same $\ell_\infty$ pretrained model; about one GPU-hour per run by our earlier estimate in the reproduction notes) uses the official losses and attacks, so no part of our pipeline is involved. The training budget is set by \texttt{--l\_eps}, which in the pinned commit accepts one \texttt{norm\_size} pair per call, so setting both norms needs a few-line patch of the kind we already apply for resuming. The official script also sets its \emph{internal} evaluation $\varepsilon$ to the training $\varepsilon$ (\texttt{RAMP.py}, lines 189--191), so its own evaluation output must never be reported; all numbers come from our fixed-$\varepsilon$ AutoAttack (audit item 28).
+Arms: a fixed-budget frontier (both norms scaled by $1.0,1.25,1.5\times$) and the allocated arms ($\ell_1$ at $1.5\times$ and $1.75\times$ with $\ell_\infty$ fixed; $\ell_\infty$ at $1.25\times$ with $\ell_1$ fixed), two seeds each: 6 arms, 12 runs, about 12 GPU-hours (about 6 session hours on two GPUs). RAMP trains no $\ell_2$, so these arms raise the total budget and are not a reallocation (audit item 26); they test the \emph{direction} of the effect.
+\emph{Directional prediction from the minimax theory:} in RAMP's own fine-tune, $\ell_1$ is the slack norm (published fine-tune numbers: $\ell_\infty$ 45.4, $\ell_1$ 47.2). So the $\ell_1$-up arms should land at about 0 or below the frontier, and the $\ell_\infty$-up arm at most about 1 point above it.
+\emph{Outcomes that can discriminate.} (i)~The $\ell_1$-up arm beats the frontier by more than the seed spread \emph{and} beats the $\ell_\infty$-up arm: the theory is falsified, and the explanation that our $+6$ came from a weak $\ell_1$ training attack is weakened. (ii)~All arms are within the seed spread of the frontier: the allocation effect does not transfer to RAMP's pipeline, which is consistent with, but does not identify, the weak-attack explanation. (iii)~The $\ell_\infty$-up arm is above the frontier and the $\ell_1$-up arm is not: the theory is supported. In case (ii) or (iii) the 10-epoch result is reported as pipeline-specific.
+Only if the effect transfers do we build \emph{controller v2}: feedback from an evaluation-grade attack and an update that moves budget only between the currently binding norms.
+
+\textbf{Programme C: adaptive $\varepsilon$ with a well-posed objective.} The faithful version of the thesis.
+\emph{Claim to test:} a margin-based or scheduled per-sample $\varepsilon$ improves the \emph{area} under the robust-accuracy curve (expected robustness), even though it does not move the single-$\varepsilon$ point beyond the frontier.
+Arms: the never-run mechanisms (global ramp, per-sample $\varepsilon$, adaptive norm sampling, i.e.\ H3), a uniform-random-$\varepsilon$ baseline, and the fixed-$\varepsilon$ frontier, scored by fixed-$\varepsilon$ union \emph{and} expected robustness over a grid.
+\emph{Prediction:} no gain at the single point (consistent with $+1$ to $+2$), a gain of about 0 to 1 point in expected robustness for the ramp (the cited work reports limited gains from linear warm-up on ResNets, so a larger gain would go against the literature), none for class-wise $\varepsilon$ on balanced data.
+\emph{Kill criterion:} expected-robustness gain under 1 point at three seeds, reported as negative. Cost is low at 10 epochs.
+
+\textbf{Programme B: inference-time adaptivity (the pupil).} A PhD-scale direction, not for this week.
+\emph{Claim to test:} a threat-aware system beats a static union-trained one when the threat is separable, and fails when it is not.
+The decisive evaluation is a \emph{mixed-norm} perturbation ($\ell_1{+}\ell_\infty$ at once) and a gate-misrouting adaptive attack, as in RoME. \emph{Prediction:} gains on single-norm threats, none or a loss on the mixture unless trained on it.
+\emph{Kill criterion:} mixed-threat robustness below the static union-trained model. Start from RoME or TaFD's public code rather than squint.
+
+\textbf{Programme D: calibration (a prerequisite, not a result).} Every 80-epoch claim needs a pipeline that reproduces RAMP. Our reimplementation did not (the official code did, at 44.4 union), so 80-epoch work uses the official code.
+
+\section{Path forward}
+\begin{enumerate}
+\item \textbf{Now, no GPU or about 2 hours.} Evaluate the existing \texttt{realloc} checkpoints and their fixed-budget controls on held-out test images 1000 to 1999 (a first slice of the held-out images 1000 to 9999 in audit item 23). Write the pre-registered predictions above into the repository before any run.
+\item \textbf{Next quota window, Programme A, official RAMP fine-tune frontier.} 12 runs, roughly 12 GPU-hours, about 6 session hours on two GPUs. This is the single most informative experiment left, because it removes every confound of our pipeline and has a prediction that can fail.
+\item \textbf{Decision point 1.} If the effect survives, run controller v2 (10-epoch pair, about 1.3 h) and confirm with a second seed. If it does not, report the correction and stop Programme A.
+\item \textbf{Then Programme C at 10 epochs}, including the three never-run mechanisms and the expected-robustness metric (about 6 GPU-hours for three seeds).
+\item \textbf{Decision point 2.} After A and C, choose the thesis story: (i) a corrected, theory-backed allocation result plus a clean negative for adaptive $\varepsilon$ (most likely), or (ii) a positive curriculum result if C shows one. Programme B becomes the PhD proposal either way.
+\item \textbf{Writing.} Keep the status report as the evidence base. The paper is the audit, the minimax view, and whichever of the two outcomes the data support.
+\end{enumerate}
+
+\begin{thebibliography}{9}
+\bibitem{ramp} E.~Jiang and G.~Singh. RAMP: Boosting adversarial robustness against multiple $\ell_p$ perturbations for universal robustness. NeurIPS 2024, arXiv:2402.06827.
+\bibitem{eps} J.~Ngnaw\'e et al. Robust fine-tuning from non-robust pretrained models: mitigating suboptimal transfer with epsilon-scheduling. ICLR 2026, arXiv:2509.23325.
+\bibitem{rlt} L.~Zhang et al. Taming the long tail: rebalancing adversarial training via adaptive perturbation. arXiv:2605.13395, 2026.
+\bibitem{front} L.~Scionis et al. Adversarial frontiers: minimum-norm attack ensembles for robustness evaluation. arXiv:2607.19855, 2026.
+\bibitem{rome} W.~J.~Kim et al. RoME: Robust mixture of low-rank experts against multiple adversarial perturbations. arXiv:2607.06109, 2026.
+\bibitem{tafd} M.~Xie, Y.~He and M.~Fang. TaFD: Threat-aware frequency decoupling for adversarial robustness against heterogeneous attacks. arXiv:2606.17540, 2026.
+\bibitem{ding} G.~W.~Ding, Y.~Sharma, K.~Y.~C.~Lui and R.~Huang. MMA training: direct input space margin maximization through adversarial training. ICLR 2020. \emph{(not opened)}
+\bibitem{cai} Q.-Z.~Cai, M.~Liu, C.~Du and D.~Song. Curriculum adversarial training. IJCAI 2018. \emph{(not opened)}
+\bibitem{maini} P.~Maini, E.~Wong and J.~Z.~Kolter. Adversarial robustness against the union of multiple perturbation models. ICML 2020. \emph{(not opened)}
+\bibitem{eat} F.~Croce and M.~Hein. Adversarial robustness against multiple and single $\ell_p$-threat models via quick fine-tuning of robust classifiers. ICML 2022. \emph{(not opened)}
+\bibitem{ilyas} A.~Ilyas et al. Adversarial examples are not bugs, they are features. NeurIPS 2019. \emph{(not opened)}
+\bibitem{ath} A.~Athalye, N.~Carlini and D.~Wagner. Obfuscated gradients give a false sense of security. ICML 2018. \emph{(not opened)}
+\bibitem{tram} F.~Tram\`er, N.~Carlini, W.~Brendel and A.~Madry. On adaptive attacks to adversarial example defenses. NeurIPS 2020. \emph{(not opened)}
+\bibitem{pang} T.~Pang et al. Bag of tricks for adversarial training. ICLR 2021. \emph{(not opened)}
+\bibitem{rice} L.~Rice, E.~Wong and J.~Z.~Kolter. Overfitting in adversarially robust deep learning. ICML 2020. \emph{(not opened)}
+\bibitem{opl} M.-Y.~Habibi et al. Neither adversarial training nor purification: emergent adversarial robustness from oscillatory predictive learning. arXiv:2609.08683, 2026.
+\end{thebibliography}
+\end{document}
